@@ -17,6 +17,8 @@ npm run build
 
 ## Principais recursos
 
+
+
 - Dashboard executivo com KPIs, gráficos e insights
 - Roadmap em timeline e lista
 - Gestão e busca de demandas
