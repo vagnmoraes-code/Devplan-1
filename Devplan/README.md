@@ -4,6 +4,7 @@ MVP navegável de um portal corporativo para planejamento trimestral, gestão de
 
 ## Executar
 
+
 ```bash
 npm install
 npm run dev
