@@ -4,11 +4,12 @@ MVP navegável de um portal corporativo para planejamento trimestral, gestão de
 
 ## Executar
 
+
 ```bash
 npm install
 npm run dev
 ```
-
+  
 Para gerar a versão de produção:
 
 ```bash
@@ -16,8 +17,6 @@ npm run build
 ```
 
 ## Principais recursos
-
-
 
 - Dashboard executivo com KPIs, gráficos e insights
 - Roadmap em timeline e lista

@@ -2931,7 +2931,6 @@ function UsersAdmin({users, currentId, onChange}:{users:Account[];currentId:stri
   }
   function changeRole(user:Account,next:AccessRole){if(user.email===ADMIN_EMAIL || user.id===currentId && next!=="Administrador")return;onChange(users.map(item=>item.id===user.id?{...item,role:next,productIds:next==="Administrador"?allIds:item.productIds??allIds}:item))}
   function changeProducts(user:Account,id:number){if(user.role==="Administrador")return;const next=toggle(user.productIds??allIds,id);onChange(users.map(item=>item.id===user.id?{...item,productIds:next}:item))}
-  function toggleBlocked(user:Account){if(user.id===currentId || user.email===ADMIN_EMAIL)return;onChange(users.map(item=>item.id===user.id?{...item,blocked:!item.blocked}:item))}
   function remove(user:Account){if(user.id===currentId || user.email===ADMIN_EMAIL)return;onChange(users.filter(item=>item.id!==user.id))}
   return <><PageHead title="Administração de usuários" desc="Defina o perfil e os produtos que cada usuário pode acessar."/>
     <Card><form className="account-form" onSubmit={add}>
@@ -2942,19 +2941,18 @@ function UsersAdmin({users, currentId, onChange}:{users:Account[];currentId:stri
       {role!=="Administrador"&&<fieldset className="user-product-options"><legend>Produtos permitidos</legend>{products.map(product=><label key={product.id}><input type="checkbox" checked={selectedProducts.includes(product.id)} onChange={()=>setSelectedProducts(toggle(selectedProducts,product.id))}/>{product.name}</label>)}</fieldset>}
       <button className="primary" type="submit"><I.UserPlus/> Criar usuário</button>
     </form>{error&&<p className="auth-error" role="alert">{error}</p>}</Card>
-    <Card><div className="tablewrap"><table><thead><tr><th>Usuário</th><th>E-mail</th><th>Perfil</th><th>Produtos permitidos</th><th>Status</th><th>Ações</th></tr></thead><tbody>{users.map(user=><tr key={user.id}>
+    <Card><div className="tablewrap"><table><thead><tr><th>Usuário</th><th>E-mail</th><th>Perfil</th><th>Produtos permitidos</th><th></th></tr></thead><tbody>{users.map(user=><tr key={user.id}>
       <td><span className="person">{user.name[0]}</span><b>{user.name}</b></td><td>{user.email}</td>
       <td><select className="quarter-inline" value={user.role} disabled={user.id===currentId||user.email===ADMIN_EMAIL} onChange={event=>changeRole(user,event.target.value as AccessRole)}><option>Administrador</option><option>Editor</option><option>Visualização</option></select></td>
       <td>{user.role==="Administrador"?"Todos os produtos":<div className="user-product-options compact">{products.map(product=><label key={product.id}><input type="checkbox" checked={(user.productIds??allIds).includes(product.id)} onChange={()=>changeProducts(user,product.id)}/>{product.name}</label>)}</div>}</td>
-      <td>{user.blocked?"Bloqueado":"Ativo"}</td>
-      <td>{user.id!==currentId&&user.email!==ADMIN_EMAIL&&<><button className="ghost" type="button" onClick={()=>toggleBlocked(user)} aria-label={`${user.blocked?"Ativar":"Bloquear"} ${user.name}`}>{user.blocked?"Ativar":"Bloquear"}</button><button className="ghost" type="button" onClick={()=>remove(user)} aria-label={`Excluir ${user.name}`}><I.Trash2/></button></>}</td>
+      <td>{user.id!==currentId&&user.email!==ADMIN_EMAIL&&<button className="ghost" onClick={()=>remove(user)} aria-label={`Excluir ${user.name}`}><I.Trash2/></button>}</td>
     </tr>)}</tbody></table></div></Card>
   </>;
 }
 
 function Login({hasAccounts,onLogin}:{hasAccounts:boolean;onLogin:(account:Account,remember:boolean,accounts?:Account[])=>void}) {
   const [name,setName]=useState("");const [email,setEmail]=useState("");const [password,setPassword]=useState("");const [remember,setRemember]=useState(false);const [error,setError]=useState("");const [busy,setBusy]=useState(false);
-  async function submit(e:React.FormEvent){e.preventDefault();setBusy(true);setError("");try {if(!hasAccounts){if(password.length<8){setError("Use uma senha com pelo menos 8 caracteres.");return}const account=await makeAccount(name,email,password,"Administrador");onLogin(account,remember,[account]);return}const account=loadAccounts().find(u=>u.email===email.trim().toLowerCase());if(!account || await hashPassword(password,account.salt)!==account.passwordHash){setError("E-mail ou senha inválidos.");return}if(account.blocked){setError("Usuário bloqueado. Contate um administrador.");return}onLogin(account,remember)}catch{setError("Não foi possível autenticar. Verifique o armazenamento do navegador.")}finally{setBusy(false)}}
+  async function submit(e:React.FormEvent){e.preventDefault();setBusy(true);setError("");try {if(!hasAccounts){if(password.length<8){setError("Use uma senha com pelo menos 8 caracteres.");return}const account=await makeAccount(name,email,password,"Administrador");onLogin(account,remember,[account]);return}const account=loadAccounts().find(u=>u.email===email.trim().toLowerCase());if(!account || await hashPassword(password,account.salt)!==account.passwordHash){setError("E-mail ou senha inválidos.");return}onLogin(account,remember)}catch{setError("Não foi possível autenticar. Verifique o armazenamento do navegador.")}finally{setBusy(false)}}
   return <div className="login-screen"><form className="login-card" onSubmit={submit}><div className="login-mark"><I.Waypoints/></div><h1>{hasAccounts?"Entrar no nddPlan":"Criar administrador"}</h1><p>{hasAccounts?"Acesse com seu e-mail e senha.":"Configure o primeiro acesso deste navegador."}</p>{!hasAccounts&&<label>Nome<input required autoComplete="name" value={name} onChange={e=>setName(e.target.value)}/></label>}<label>E-mail<input required type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)}/></label><label>Senha<input required type="password" minLength={hasAccounts?1:8} autoComplete={hasAccounts?"current-password":"new-password"} value={password} onChange={e=>setPassword(e.target.value)}/></label><label className="remember-login"><input type="checkbox" checked={remember} onChange={event=>setRemember(event.target.checked)}/><span>Manter conectado neste navegador</span></label>{error&&<p className="auth-error" role="alert">{error}</p>}<button className="primary" disabled={busy} type="submit">{busy?"Aguarde...":hasAccounts?"Entrar":"Criar conta e entrar"}</button><small>Os usuários e dados deste protótipo ficam armazenados neste navegador.</small></form></div>
 }
 
@@ -2962,7 +2960,7 @@ function App() {
   const productCatalog = useContext(ProductContext);
   const [accounts,setAccounts]=useState<Account[]>(loadAccounts);
   const [activeId,setActiveId]=useState<string|null>(sessionId);
-  const activeUser=accounts.find(u=>u.id===activeId && !u.blocked);
+  const activeUser=accounts.find(u=>u.id===activeId);
   const [page, setPage] = useState<Page>("Visão geral");
   const [dark, setDark] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
