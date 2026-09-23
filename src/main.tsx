@@ -2941,10 +2941,11 @@ function UsersAdmin({users, currentId, onChange}:{users:Account[];currentId:stri
       {role!=="Administrador"&&<fieldset className="user-product-options"><legend>Produtos permitidos</legend>{products.map(product=><label key={product.id}><input type="checkbox" checked={selectedProducts.includes(product.id)} onChange={()=>setSelectedProducts(toggle(selectedProducts,product.id))}/>{product.name}</label>)}</fieldset>}
       <button className="primary" type="submit"><I.UserPlus/> Criar usuário</button>
     </form>{error&&<p className="auth-error" role="alert">{error}</p>}</Card>
-    <Card><div className="tablewrap"><table><thead><tr><th>Usuário</th><th>E-mail</th><th>Perfil</th><th>Produtos permitidos</th><th></th></tr></thead><tbody>{users.map(user=><tr key={user.id}>
+    <Card><div className="tablewrap"><table><thead><tr><th>Usuário</th><th>E-mail</th><th>Perfil</th><th>Produtos permitidos</th><th>Último acesso</th><th></th></tr></thead><tbody>{users.map(user=><tr key={user.id}>
       <td><span className="person">{user.name[0]}</span><b>{user.name}</b></td><td>{user.email}</td>
       <td><select className="quarter-inline" value={user.role} disabled={user.id===currentId||user.email===ADMIN_EMAIL} onChange={event=>changeRole(user,event.target.value as AccessRole)}><option>Administrador</option><option>Editor</option><option>Visualização</option></select></td>
       <td>{user.role==="Administrador"?"Todos os produtos":<div className="user-product-options compact">{products.map(product=><label key={product.id}><input type="checkbox" checked={(user.productIds??allIds).includes(product.id)} onChange={()=>changeProducts(user,product.id)}/>{product.name}</label>)}</div>}</td>
+      <td>{user.lastAccessAt && Number.isFinite(Date.parse(user.lastAccessAt)) ? <time dateTime={user.lastAccessAt}>{new Date(user.lastAccessAt).toLocaleString("pt-BR")}</time> : "Sem registro"}</td>
       <td>{user.id!==currentId&&user.email!==ADMIN_EMAIL&&<button className="ghost" onClick={()=>remove(user)} aria-label={`Excluir ${user.name}`}><I.Trash2/></button>}</td>
     </tr>)}</tbody></table></div></Card>
   </>;
@@ -2967,7 +2968,7 @@ function App() {
   const [cmd, setCmd] = useState(false);
   const role=activeUser?.role ?? "Visualização";
   function updateAccounts(next:Account[]){saveAccounts(next);setAccounts(next)}
-  function login(account:Account,remember:boolean,next?:Account[]){if(next)updateAccounts(next);setSession(account.id,remember);setActiveId(account.id)}
+  function login(account:Account,remember:boolean,next?:Account[]){const lastAccessAt=new Date().toISOString();updateAccounts((next??loadAccounts()).map(user=>user.id===account.id?{...user,lastAccessAt}:user));setSession(account.id,remember);setActiveId(account.id)}
   function logout(){setSession(null);setActiveId(null);setCmd(false)}
   const allowedNav=nav.filter(([name])=>role==="Administrador"?true:role==="Editor"?["Visão geral","Demandas","Roadmap","Comparação","Produtos","Capacidade","Analytics"].includes(name):["Demandas","Roadmap","Comparação","Capacidade","Analytics"].includes(name));
   useEffect(()=>{if(!allowedNav.some(([name])=>name===page))setPage(role==="Visualização"?"Demandas":"Visão geral")},[role]);

@@ -1,5 +1,5 @@
 export type AccessRole = "Administrador" | "Editor" | "Visualização";
-export type Account = { id: string; name: string; email: string; role: AccessRole; productIds?: number[]; salt: string; passwordHash: string };
+export type Account = { id: string; name: string; email: string; role: AccessRole; productIds?: number[]; lastAccessAt?: string; salt: string; passwordHash: string };
 
 const USERS_KEY = "roadmap.accounts.v1";
 const SESSION_KEY = "roadmap.session.v1";
