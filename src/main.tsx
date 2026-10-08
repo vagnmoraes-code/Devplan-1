@@ -1,4 +1,4 @@
-import React, {
+﻿import React, {
   createContext,
   useContext,
   useEffect,
@@ -28,8 +28,9 @@ import "./dashboard.css";
 import "./capacity.css";
 import "./changes.css";
 import "./demands.css";
+import "./initiatives.css";
 import capacitySeed from "./capacity-seed.json";
-import { ADMIN_EMAIL, Account, AccessRole, hashPassword, loadAccounts, makeAccount, saveAccounts, sessionId, setSession } from "./auth";
+import { ADMIN_EMAIL, Account, AccessRole, hashPassword, loadAccounts, makeAccount, saveAccounts, sessionId, setSession, updateAccountPassword } from "./auth";
 
 function usePersistentState<T>(key: string, initialValue: T | (() => T)) {
   const [value, setValue] = useState<T>(() => {
@@ -58,7 +59,8 @@ function usePersistentState<T>(key: string, initialValue: T | (() => T)) {
 type Page =
   | "Visão geral"
   | "Roadmap"
-  | "Comparação"
+  | "Iniciativas"
+  | "Baseline"
   | "Demandas"
   | "Produtos"
   | "Capacidade"
@@ -66,6 +68,7 @@ type Page =
   | "Auditoria"
   | "Relatórios"
   | "Analytics"
+  | "Visibilidade Entregas"
   | "Configurações"
   | "Usuários";
 type Demand = {
@@ -83,12 +86,17 @@ type Demand = {
   due: string;
   risk: string;
   type?: string;
+  origin?: string;
+  requester?: string;
   version?: string;
+  artifactNumber?: string;
   notes?: string;
   startDate?: string;
   dueDate?: string;
   resourceIds?: number[];
 };
+type InitiativeStatus = "Não iniciada" | "Em andamento" | "Concluída" | "Bloqueada";
+type Initiative = { id: string; name: string; status: InitiativeStatus; startDate: string; endDate: string; owner: string; observation: string; progress: number };
 type ChangeLog={id:number;date:string;title:string;actor:string;detail:string;tone:"blue"|"good"|"warn"|"bad";product?:string;quarter?:string;demandId?:string;demandName?:string};
 type Product = {
   id: number;
@@ -140,6 +148,42 @@ function migrateProducts() {
   } catch { /* Mantém os dados locais quando o armazenamento não estiver disponível. */ }
 }
 migrateProducts();
+function migrateDemandStatuses() {
+  const migrationKey = "dev-plan:demand-statuses-v2";
+  try {
+    if (localStorage.getItem(migrationKey)) return;
+    const raw = localStorage.getItem("dev-plan:demands");
+    if (raw) {
+      const statusMap: Record<string, string> = { Planejada: "Planejado", "Em análise": "Em Estudos", "Em andamento": "Em Desenvolvimento", Desenvolvimento: "Em Desenvolvimento", "Em testes": "Em Desenvolvimento", Homologação: "Em Desenvolvimento", Concluída: "Concluído", Cancelada: "Cancelado", Bloqueada: "Bloqueado" };
+      const rows = JSON.parse(raw);
+      if (Array.isArray(rows)) localStorage.setItem("dev-plan:demands", JSON.stringify(rows.map(item => ({ ...item, status: statusMap[item.status] || item.status }))));
+    }
+    localStorage.setItem(migrationKey, "1");
+  } catch { /* Mantém os dados atuais caso o armazenamento local esteja indisponível. */ }
+}
+migrateDemandStatuses();
+function migrateDemandOwners() {
+  const migrationKey = "dev-plan:demand-owners-higor-v2";
+  try {
+    if (localStorage.getItem(migrationKey)) return;
+    const raw = localStorage.getItem("dev-plan:demands");
+    if (raw) {
+      const rows = JSON.parse(raw);
+      if (Array.isArray(rows)) localStorage.setItem("dev-plan:demands", JSON.stringify(rows.map(item => ({ ...item, owner: "Higor de Jesus" }))));
+    }
+    localStorage.setItem(migrationKey, "1");
+  } catch { /* Mantém os dados se o armazenamento local estiver indisponível. */ }
+}
+migrateDemandOwners();
+function clearStoredRoadmapVersions() {
+  const migrationKey = "dev-plan:roadmap-versions-cleared-v1";
+  try {
+    if (localStorage.getItem(migrationKey)) return;
+    localStorage.setItem("dev-plan:roadmap-versions", "[]");
+    localStorage.setItem(migrationKey, "1");
+  } catch { /* O portal continua funcionando se o armazenamento local estiver indisponível. */ }
+}
+clearStoredRoadmapVersions();
 const ProductContext = createContext<{
   products: Product[];
   setProducts: React.Dispatch<React.SetStateAction<Product[]>>;
@@ -219,10 +263,10 @@ const demands: Demand[] = [
 function replaceRegisteredDemands() {
   try {
     if (localStorage.getItem("dev-plan:demands-v2")) return;
-    localStorage.setItem("dev-plan:demands", JSON.stringify(demands));
-    localStorage.setItem("dev-plan:roadmap", "[]");
-    localStorage.setItem("dev-plan:history", "[]");
-    localStorage.setItem("dev-plan:roadmap-versions", "[]");
+    if (localStorage.getItem("dev-plan:demands") === null) localStorage.setItem("dev-plan:demands", JSON.stringify(demands));
+    if (localStorage.getItem("dev-plan:roadmap") === null) localStorage.setItem("dev-plan:roadmap", "[]");
+    if (localStorage.getItem("dev-plan:history") === null) localStorage.setItem("dev-plan:history", "[]");
+    if (localStorage.getItem("dev-plan:roadmap-versions") === null) localStorage.setItem("dev-plan:roadmap-versions", "[]");
     localStorage.setItem("dev-plan:demands-v2", "1");
   } catch { /* A lista inicial continua disponível sem armazenamento local. */ }
 }
@@ -293,16 +337,18 @@ const nav: [Page, any][] = [
   ["Visão geral", I.LayoutDashboard],
   ["Demandas", I.ListTodo],
   ["Roadmap", I.Map],
-  ["Comparação", I.GitCompareArrows],
+  ["Iniciativas", I.Lightbulb],
+  ["Baseline", I.GitCompareArrows],
+  ["Visibilidade Entregas", I.CalendarRange],
+  ["Analytics", I.ChartNoAxesCombined],
   ["Produtos", I.Boxes],
   ["Capacidade", I.Users],
-  ["Planejamento", I.CalendarRange],
   ["Auditoria", I.ClipboardCheck],
   ["Relatórios", I.BarChart3],
-  ["Analytics", I.ChartNoAxesCombined],
   ["Configurações", I.Settings],
   ["Usuários", I.UserCog],
 ];
+const mainNavPages: Page[] = ["Visão geral", "Demandas", "Roadmap", "Iniciativas", "Baseline", "Visibilidade Entregas", "Analytics"];
 const trend = [
   { w: "S1", plan: 22, done: 18 },
   { w: "S2", plan: 34, done: 28 },
@@ -312,7 +358,7 @@ const trend = [
   { w: "S6", plan: 88, done: 78 },
 ];
 const C = {
-  blue: "#246bfd",
+  blue: "#7052f5",
   cyan: "#38bdf8",
   green: "#16a36a",
   amber: "#f59e0b",
@@ -377,11 +423,12 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const { products } = useProducts();
   const { team } = useTeam();
   const [productFilter, setProductFilter] = useState("Todos");
+  const [capacityQuarter, setCapacityQuarter] = useState(currentQuarter);
   const scoped = productFilter === "Todos" ? rows : rows.filter((d) => d.product === productFilter);
   const scopedIds = new Set(scoped.map((d) => d.id));
   const planned = roadmap.filter((item) => scopedIds.has(item.demandId));
   const effort = scoped.reduce((sum, demand) => sum + demand.effort, 0);
-  const scopedTeam = productFilter === "Todos" ? team : team.filter((person) => person.product === productFilter);
+  const scopedTeam = (productFilter === "Todos" ? team : team.filter((person) => person.product === productFilter)).filter(person => person.active !== false);
   const totalCapacity = scopedTeam.reduce((sum, person) => sum + person.total, 0);
   const demandHoursFor = (staffId: number) => rows.reduce((total, demand) => {
     const plan = roadmap.find((item) => item.demandId === demand.id);
@@ -405,10 +452,30 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const baseCapacity = 0;
   const availableCapacity = Math.max(0, totalCapacity - allocatedCapacity);
   const utilization = totalCapacity ? Math.round((allocatedCapacity / totalCapacity) * 100) : 0;
-  const capacityByProduct=products.filter((product)=>product.active&&(productFilter==="Todos"||product.name===productFilter)).map((product)=>{const people=team.filter((person)=>person.product===product.name);const total=people.reduce((sum,person)=>sum+person.total,0);const allocated=people.reduce((sum,person)=>sum+demandHoursFor(person.id),0);return {product:product.name,total,allocated,available:total-allocated,utilization:total?Math.round(allocated/total*100):0}});
-  const capacityChart = ["Jul", "Ago", "Set"].map((m) => {
+  const capacityByProduct=products.filter((product)=>product.active&&(productFilter==="Todos"||product.name===productFilter)).map((product)=>{const people=team.filter((person)=>person.product===product.name&&person.active!==false);const total=people.reduce((sum,person)=>sum+person.total,0);const allocated=people.reduce((sum,person)=>sum+demandHoursFor(person.id),0);return {product:product.name,total,allocated,available:total-allocated,collaborators:people.length,utilization:total?Math.round(allocated/total*100):0}});
+  const quarterKey = capacityQuarter.slice(0, 2);
+  const monthLabels: Record<string, string[]> = {
+    Q1: ["Jan", "Fev", "Mar"],
+    Q2: ["Abr", "Mai", "Jun"],
+    Q3: ["Jul", "Ago", "Set"],
+    Q4: ["Out", "Nov", "Dez"],
+  };
+  const quarterRoadmapCapacity = scopedTeam.reduce((sum, person) => {
+    const hours = roadmap.filter((item) => item.quarter === capacityQuarter).reduce((itemTotal, item) => {
+      const demand = rows.find((row) => row.id === item.demandId);
+      if (!demand || (productFilter !== "Todos" && demand.product !== productFilter)) return itemTotal;
+      const explicit = item.allocations.find((allocation) => allocation.staffId === person.id);
+      if (explicit) return itemTotal + explicit.hours;
+      if (!(demand.resourceIds || []).includes(person.id)) return itemTotal;
+      const explicitTotal = item.allocations.reduce((allocationTotal, allocation) => allocationTotal + allocation.hours, 0);
+      const unadjusted = (demand.resourceIds || []).filter((id) => !item.allocations.some((allocation) => allocation.staffId === id));
+      return itemTotal + (unadjusted.length ? Math.round(Math.max(0, demand.effort - explicitTotal) / unadjusted.length) : 0);
+    }, 0);
+    return sum + hours;
+  }, 0);
+  const capacityChart = (monthLabels[quarterKey] || monthLabels.Q1).map((m) => {
     const monthlyTotal = Math.round(totalCapacity / 3);
-    const roadmapHours = Math.round(roadmapCapacity / 3);
+    const roadmapHours = Math.round(quarterRoadmapCapacity / 3);
     const sustentacao = Math.round(baseCapacity / 3);
     return { m, roadmap: roadmapHours, sustentacao, novas: 0, reserva: Math.max(0, monthlyTotal - roadmapHours - sustentacao) };
   });
@@ -433,11 +500,6 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
       <PageHead
         title="Visão geral do roadmap"
         desc="Acompanhe capacidade, progresso e decisões críticas do trimestre."
-        action={
-          <button className="primary" onClick={() => go("Planejamento")}>
-            <I.Sparkles /> Simular mudança
-          </button>
-        }
       />
       <div className="dashboard-filter"><div><I.Filter/><span><b>Escopo dos indicadores</b><small>Visualize o consolidado ou um produto específico</small></span></div><select value={productFilter} onChange={(e) => setProductFilter(e.target.value)}><option>Todos</option>{products.filter((p)=>p.active).map((p)=><option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
       <div className="kpis dashboard-kpis">
@@ -458,17 +520,17 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
         ))}
       </div>
       <Card className="discipline-capacity-card"><div className="cardhead"><div><h3>Capacidade por disciplina</h3><p>Horas cadastradas para o escopo selecionado</p></div></div><div className="discipline-capacity-grid"><div><span><I.Code2/> Capacidade de Desenvolvimento</span><strong>{developmentCapacity}h</strong><small>{developmentTeam.length} colaboradores DEV</small></div><div><span><I.FlaskConical/> Capacidade de Testes</span><strong>{testingCapacity}h</strong><small>{testingTeam.length} colaboradores QA</small></div><div><span><I.UsersRound/> Capacidade de Coordenação</span><strong>{coordinationCapacity}h</strong><small>{coordinationTeam.length} coordenador(es)</small></div><div><span><I.Braces/> Capacidade de Especialista DEV 1</span><strong>{specialistCapacity}h</strong><small>{specialistTeam.length} especialista(s)</small></div></div></Card>
-      <Card className="product-capacity-card"><div className="cardhead"><div><h3>Capacidade por produto</h3><p>Capacidade cadastrada, alocada e disponível por produto</p></div><Badge tone="gray">{capacityByProduct.length} produto(s)</Badge></div><div className="product-capacity-grid">{capacityByProduct.map((item)=><div className="product-capacity-item" key={item.product}><div><span className="product-mini-icon"><I.Boxes/></span><div><b>{item.product}</b><small>{item.available}h disponíveis</small></div><strong className={item.utilization>90?"bad":""}>{item.utilization}%</strong></div><div className="product-capacity-bar"><i className={item.utilization>90?"over":""} style={{width:Math.min(item.utilization,100)+"%"}}/></div><footer><span>Total <b>{item.total}h</b></span><span>Alocada <b>{item.allocated}h</b></span></footer></div>)}</div></Card>
+      <Card className="product-capacity-card"><div className="cardhead"><div><h3>Capacidade por produto</h3><p>Capacidade cadastrada, alocada e disponível por produto</p></div><Badge tone="gray">{capacityByProduct.length} produto(s)</Badge></div><div className="product-capacity-grid">{capacityByProduct.map((item)=><div className="product-capacity-item" key={item.product}><div><span className="product-mini-icon"><I.Boxes/></span><div><b>{item.product}</b><small>{item.available}h disponíveis</small></div><strong className={item.utilization>90?"bad":""}>{item.utilization}%</strong></div><div className="product-capacity-bar"><i className={item.utilization>90?"over":""} style={{width:Math.min(item.utilization,100)+"%"}}/></div><footer><span>Total <b>{item.total}h</b></span><span>Alocada <b>{item.allocated}h</b></span><span>Colaboradores <b>{item.collaborators}</b></span></footer></div>)}</div></Card>
       <div className="grid2">
         <Card>
           <div className="cardhead">
             <div>
               <h3>Capacidade por categoria</h3>
-              <p>Distribuição mensal do trimestre</p>
+              <p>Distribuição mensal de {capacityQuarter}</p>
             </div>
-            <button className="icon">
-              <I.MoreHorizontal />
-            </button>
+            <label className="quarter-select capacity-chart-quarter"><I.CalendarRange/><select aria-label="Quarter da capacidade por categoria" value={capacityQuarter} onChange={(event) => setCapacityQuarter(event.target.value)}>
+              {[...new Set([...quarters, currentQuarter])].map((quarter) => <option key={quarter} value={quarter}>{quarter}{quarter === currentQuarter ? " · Atual" : ""}</option>)}
+            </select></label>
           </div>
           <div className="chart">
             <ResponsiveContainer>
@@ -654,7 +716,7 @@ function ExecutiveView() {
   const isDone = (demand: Demand) => demand.progress === 100 || ["Concluído", "Concluída"].includes(demand.status);
   const delivered = scoped.filter(isDone);
   const overlapsWeek = (demand: Demand) => Boolean(demand.startDate && demand.dueDate && demand.startDate <= end && demand.dueDate >= start);
-  const planned = scoped.filter((demand) => !isDone(demand) && overlapsWeek(demand) && (demand.progress === 0 || ["Backlog", "Planejada"].includes(demand.status)));
+  const planned = scoped.filter((demand) => !isDone(demand) && overlapsWeek(demand) && (demand.progress === 0 || ["Backlog", "Planejado"].includes(demand.status)));
   const plannedIds = new Set(planned.map((demand) => demand.id));
   const executing = scoped.filter((demand) => !isDone(demand) && overlapsWeek(demand) && !plannedIds.has(demand.id));
   const format = (date: Date) => date.toLocaleDateString("pt-BR", {day:"2-digit",month:"short"}).replace(".","");
@@ -746,23 +808,17 @@ const quarterMonths: Record<string, string[]> = {
   Q3: ["JULHO", "AGOSTO", "SETEMBRO"],
   Q4: ["OUTUBRO", "NOVEMBRO", "DEZEMBRO"],
 };
-const quarters = [
-  "Q1 2026",
-  "Q2 2026",
-  "Q3 2026",
-  "Q4 2026",
-  "Q1 2027",
-  "Q2 2027",
-  "Q3 2027",
-  "Q4 2027",
-];
+const now = new Date();
+const currentQuarter = `Q${Math.floor(now.getMonth() / 3) + 1} ${now.getFullYear()}`;
+const quarterCount = Math.max(8, (now.getFullYear() - 2026 + 2) * 4);
+const quarters = Array.from({ length: quarterCount }, (_, index) => `Q${index % 4 + 1} ${2026 + Math.floor(index / 4)}`);
 
 function Roadmap() {
   const { rows, roadmap, setRoadmap, setHistory, versions, setVersions } = useDemands();
   const { team } = useTeam();
   const { products } = useProducts();
   const [view, setView] = useState("Timeline");
-  const [quarter, setQuarter] = useState("Q3 2026");
+  const [quarter, setQuarter] = useState(currentQuarter);
   const [productFilter, setProductFilter] = useState("Todos");
   const [picker, setPicker] = useState(false);
   const [pickerProduct, setPickerProduct] = useState("");
@@ -775,7 +831,7 @@ function Roadmap() {
     (d) => !roadmap.some((r) => r.demandId === d.id),
   );
   const availableForProduct = available.filter(demand => demand.product === pickerProduct);
-  const pickerProducts = Array.from(new Set([...products.filter(product => product.active).map(product => product.name), ...available.map(demand => demand.product)]));
+  const pickerProducts = products.filter(product => product.active).map(product => product.name);
   const openPicker = () => { setPickerProduct(productFilter === "Todos" ? "" : productFilter); setPicker(true); };
   const months = quarterMonths[quarter.slice(0, 2)];
   const register=(title:string,detail:string,tone:ChangeLog["tone"]="blue",eventQuarter?:string)=>{const demandId=detail.match(/DEV-\d+/)?.[0];const demand=rows.find((d)=>d.id===demandId);setHistory((current)=>[{id:Date.now(),date:new Date().toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}),title,actor:"Vagner Moraes",detail,tone,product:demand?.product,quarter:eventQuarter,demandId,demandName:demand?.name},...current])};
@@ -986,7 +1042,7 @@ function Roadmap() {
               </button>
             </div>
             <div className="staff-check-list">
-              {team.filter((person) => person.product === rows.find((d) => d.id === staffFor.demandId)?.product).map((person) => (
+              {team.filter((person) => person.active !== false && person.product === rows.find((d) => d.id === staffFor.demandId)?.product).map((person) => (
                 <label key={person.id}>
                   <span className="avatar">
                     {person.name
@@ -1170,6 +1226,7 @@ const emptyDemandForm = {
   product: "nddMove",
   type: "Evolutiva",
   version: "",
+  artifactNumber: "",
   origin: "Produto",
   requester: "",
   priority: "Média",
@@ -1181,12 +1238,18 @@ const emptyDemandForm = {
   actualEffort: "",
   billable: "false",
   billedAmount: "",
-  owner: "",
+  owner: "Higor de Jesus",
   dependencies: "",
   justification: "",
   impact: "",
   resourceIds: [] as number[],
   planningQuarter: "Planejamento",
+};
+const displayDemandStatus = (status: string) => {
+  const normalized = status.trim().toLocaleLowerCase("pt-BR");
+  if (normalized === "em andamento") return "Em Desenvolvimento";
+  if (["não iniciada", "nao iniciada", "não iniciado", "nao iniciado"].includes(normalized)) return "Não Iniciado";
+  return status;
 };
 function Demands() {
   const [q, setQ] = useState("");
@@ -1197,7 +1260,7 @@ function Demands() {
   const [saved, setSaved] = useState(false);
   const [editing, setEditing] = useState<Demand | null>(null);
   const [quickEditing, setQuickEditing] = useState<Demand | null>(null);
-  const [quickForm, setQuickForm] = useState({ progress: "0", actualEffort: "", due: "" });
+  const [quickForm, setQuickForm] = useState({ progress: "0", actualEffort: "", due: "", type: "Evolutiva", owner: "" });
   const [quickError, setQuickError] = useState("");
   const [removing, setRemoving] = useState<Demand | null>(null);
   const [viewing, setViewing] = useState<Demand | null>(null);
@@ -1211,15 +1274,18 @@ function Demands() {
   const [executionFilter,setExecutionFilter]=useState("Todas");
   const [statusFilter,setStatusFilter]=useState("Todos");
   const selectedProduct = products.find((product) => product.name === form.product);
-  const availableResources = team.filter((person) => person.product === form.product);
-  const statusOptions=Array.from(new Set(rows.map((d)=>d.status))).sort();
+  const availableResources = team.filter((person) => person.active !== false && person.product === form.product);
+  const statusOptions=Array.from(new Set([...rows.map((d)=>displayDemandStatus(d.status)), "Não Iniciado"])).filter((status)=>status!=="Em Andamento").sort((a,b)=>a.localeCompare(b,"pt-BR"));
   const now=new Date();
   const today=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
   const filtered = rows.filter((d) => {
     const planning=roadmap.find((item)=>item.demandId===d.id);
     const matchesQuarter=quarterFilter==="Todos"||(quarterFilter==="Planejamento"?!planning:planning?.quarter===quarterFilter);
     const runningToday=Boolean(d.startDate&&d.dueDate&&d.startDate<=today&&d.dueDate>=today);
-    return (d.name+d.id+d.product).toLowerCase().includes(q.toLowerCase())&&(productFilter==="Todos"||d.product===productFilter)&&matchesQuarter&&(executionFilter==="Todas"||runningToday)&&(statusFilter==="Todos"||d.status===statusFilter);
+    return (d.name+d.id+d.product).toLowerCase().includes(q.toLowerCase())&&(productFilter==="Todos"||d.product===productFilter)&&matchesQuarter&&(executionFilter==="Todas"||runningToday)&&(statusFilter==="Todos"||displayDemandStatus(d.status)===statusFilter);
+  }).sort((a,b)=>{
+    const rank=(status:string)=>({"Concluído":0,"Concluída":0,"Em Desenvolvimento":1,"Não Iniciado":2}[displayDemandStatus(status)]??3);
+    return rank(a.status)-rank(b.status)||a.name.localeCompare(b.name,"pt-BR");
   });
   const change = (
     e: React.ChangeEvent<
@@ -1234,13 +1300,9 @@ function Demands() {
       setForm({ ...form, billable: e.target.value, billedAmount: e.target.value === "true" ? form.billedAmount : "" });
       return;
     }
-    if (e.target.name === "status" && e.target.value === "Concluído") {
-      setForm({ ...form, status: "Concluído", progress: "100" });
-      return;
-    }
     setForm({ ...form, [e.target.name]: e.target.value });
   };
-  const importExcel=async(e:React.ChangeEvent<HTMLInputElement>)=>{const file=e.target.files?.[0];if(!file)return;setImporting(true);setImportFeedback("");try{const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await file.arrayBuffer());const sheet=workbook.worksheets[0];if(!sheet)throw new Error("Planilha sem conteúdo");const headers:Record<number,string>={};sheet.getRow(1).eachCell((cell,col)=>{headers[col]=String(cell.text).trim().toLowerCase()});const imported:Demand[]=[];let ignored=0;const text=(row:ExcelJS.Row,names:string[])=>{const col=Object.entries(headers).find(([,header])=>names.includes(header))?.[0];return col?row.getCell(Number(col)).text.trim():""};const iso=(value:string)=>{if(!value)return "";const match=value.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);return match?`${match[3]}-${match[2].padStart(2,"0")}-${match[1].padStart(2,"0")}`: /^\d{4}-\d{2}-\d{2}$/.test(value)?value:""};const nextId=Math.max(...rows.map((d)=>Number(d.id.replace(/\D/g,""))||0),159)+1;sheet.eachRow((row,rowNumber)=>{if(rowNumber===1)return;const name=text(row,["demanda","título","titulo"]);const productText=text(row,["produto"]);const product=products.find((p)=>p.name.toLowerCase()===productText.toLowerCase()&&p.active);if(!name||!product){ignored++;return}const dueDate=iso(text(row,["prazo","prazo desejado","data fim","data de fim"]));const effort=Number(text(row,["capacidade estimada","esforço","esforco","horas"]).replace(",","."))||0;imported.push({id:`DEV-${nextId+imported.length}`,name,product:product.name,owner:product.coordinator.split(" ")[0],status:text(row,["status"])||"Backlog",priority:text(row,["prioridade"])||"Média",effort,progress:0,due:dueDate?new Date(dueDate+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short"}).replace(".",""):"Sem prazo",dueDate,startDate:iso(text(row,["data de início","data de inicio","início","inicio"])),risk:"Médio",type:text(row,["categoria","tipo"])||"Evolutiva",version:text(row,["versão","versao"]),notes:text(row,["observações","observacoes"]),resourceIds:[]})});if(imported.length)setRows((current)=>[...imported,...current]);setImportFeedback(`${imported.length} demanda(s) importada(s)${ignored?` · ${ignored} linha(s) ignorada(s)`:""}.`)}catch{setImportFeedback("Não foi possível ler a planilha. Verifique o formato e os cabeçalhos.")}finally{setImporting(false);e.target.value=""}};
+  const importExcel=async(e:React.ChangeEvent<HTMLInputElement>)=>{const file=e.target.files?.[0];if(!file)return;setImporting(true);setImportFeedback("");try{const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await file.arrayBuffer());const sheet=workbook.worksheets[0];if(!sheet)throw new Error("Planilha sem conteúdo");const headers:Record<number,string>={};sheet.getRow(1).eachCell((cell,col)=>{headers[col]=String(cell.text).trim().toLowerCase()});const imported:Demand[]=[];let ignored=0;const text=(row:ExcelJS.Row,names:string[])=>{const col=Object.entries(headers).find(([,header])=>names.includes(header))?.[0];return col?row.getCell(Number(col)).text.trim():""};const iso=(value:string)=>{if(!value)return "";const match=value.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);return match?`${match[3]}-${match[2].padStart(2,"0")}-${match[1].padStart(2,"0")}`: /^\d{4}-\d{2}-\d{2}$/.test(value)?value:""};const nextId=Math.max(...rows.map((d)=>Number(d.id.replace(/\D/g,""))||0),159)+1;sheet.eachRow((row,rowNumber)=>{if(rowNumber===1)return;const name=text(row,["demanda","título","titulo"]);const productText=text(row,["produto"]);const product=products.find((p)=>p.name.toLowerCase()===productText.toLowerCase()&&p.active);if(!name||!product){ignored++;return}const dueDate=iso(text(row,["prazo","prazo desejado","data fim","data de fim"]));const effort=Number(text(row,["capacidade estimada","esforço","esforco","horas"]).replace(",","."))||0;imported.push({id:`DEV-${nextId+imported.length}`,name,product:product.name,owner:product.coordinator.split(" ")[0],status:text(row,["status"])||"Backlog",priority:text(row,["prioridade"])||"Média",effort,progress:0,due:dueDate?new Date(dueDate+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short"}).replace(".",""):"Sem prazo",dueDate,startDate:iso(text(row,["data de início","data de inicio","início","inicio"])),risk:"Médio",type:text(row,["categoria","tipo"])||"Evolutiva",origin:text(row,["origem"])||"Produto",requester:text(row,["solicitante"]),version:text(row,["versão","versao"]),notes:text(row,["observações","observacoes"]),resourceIds:[]})});if(imported.length)setRows((current)=>[...imported,...current]);setImportFeedback(`${imported.length} demanda(s) importada(s)${ignored?` · ${ignored} linha(s) ignorada(s)`:""}.`)}catch{setImportFeedback("Não foi possível ler a planilha. Verifique o formato e os cabeçalhos.")}finally{setImporting(false);e.target.value=""}};
   const close = () => {
     setModal(false);
     setEditing(null);
@@ -1274,17 +1336,19 @@ function Demands() {
       name: d.name,
       product: d.product,
       priority: d.priority,
-      status: d.status,
+      status: displayDemandStatus(d.status),
       progress: String(d.progress),
       type: d.type || "Evolutiva",
       version: d.version || "",
+      artifactNumber: d.artifactNumber || "",
       description: d.notes || "",
       effort: String(d.effort),
       actualEffort: d.actualEffort === undefined ? "" : String(d.actualEffort),
       billable: String(d.billable ?? false),
       billedAmount: d.billedAmount === undefined ? "" : String(d.billedAmount),
       owner: d.owner,
-      requester: d.owner,
+      origin: d.origin || "Produto",
+      requester: d.requester || "",
       startDate: d.startDate || "",
       due: d.dueDate || (parts.length === 2 ? `2026-${month[parts[1]] || "09"}-${parts[0].padStart(2, "0")}` : ""),
       resourceIds: d.resourceIds || [],
@@ -1312,19 +1376,22 @@ function Demands() {
       id: editing?.id || `DEV-${160 + rows.length}`,
       name: form.name.trim(),
       product: form.product,
-      owner: selectedProduct?.coordinator.split(" ")[0] || "Time",
-      status: Number(form.progress) === 100 ? "Concluído" : form.status,
+      owner: form.owner.trim() || "Higor de Jesus",
+      status: form.status,
       priority: form.priority,
       effort: Number(form.effort),
       actualEffort: form.actualEffort === "" ? undefined : Number(form.actualEffort),
       billable: form.billable === "true",
       billedAmount: form.billable === "true" ? Math.round(billedAmount * 100) / 100 : 0,
-      progress: Math.min(100, Math.max(0, Number(form.progress) || 0)),
+      progress: editing?.progress ?? 0,
       due,
       dueDate: form.due,
       risk: form.priority === "Crítica" ? "Alto" : editing?.risk || "Médio",
       type: form.type,
-      version: form.version,
+      origin: form.origin,
+      requester: form.requester.trim(),
+      version: editing?.version,
+      artifactNumber: form.artifactNumber.trim(),
       notes: form.description,
       startDate: form.startDate,
       resourceIds: form.resourceIds,
@@ -1344,7 +1411,7 @@ function Demands() {
   };
   const openQuickEdit = (demand: Demand) => {
     setQuickEditing(demand);
-    setQuickForm({ progress: String(demand.progress), actualEffort: demand.actualEffort === undefined ? "" : String(demand.actualEffort), due: demand.dueDate || "" });
+    setQuickForm({ progress: String(demand.progress), actualEffort: demand.actualEffort === undefined ? "" : String(demand.actualEffort), due: demand.dueDate || "", type: demand.type || "Evolutiva", owner: demand.owner || "Higor de Jesus" });
     setQuickError("");
   };
   const saveQuickEdit = (event: React.FormEvent) => {
@@ -1359,7 +1426,7 @@ function Demands() {
     const due = quickForm.due ? new Date(`${quickForm.due}T12:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }).replace(".", "") : quickEditing.dueDate ? "Sem prazo" : quickEditing.due;
     const wasCompleted = ["Concluído", "Concluída"].includes(quickEditing.status);
     setRows(current => current.map(demand => demand.id === quickEditing.id ? {
-      ...demand, progress, actualEffort: quickForm.actualEffort.trim() === "" ? undefined : actualEffort, due, dueDate: quickForm.due,
+      ...demand, progress, actualEffort: quickForm.actualEffort.trim() === "" ? undefined : actualEffort, due, dueDate: quickForm.due, type: quickForm.type, owner: quickForm.owner.trim() || "Higor de Jesus",
       status: progress === 100 ? "Concluído" : wasCompleted ? (progress === 0 ? "Backlog" : "Desenvolvimento") : demand.status,
     } : demand));
     setQuickEditing(null);
@@ -1422,14 +1489,6 @@ function Demands() {
             <h3>Todas as demandas</h3>
             <p>{filtered.length} resultados · atualizado agora</p>
           </div>
-          <div className="seg">
-            <button className="active">
-              <I.List /> Lista
-            </button>
-            <button>
-              <I.Columns3 /> Board
-            </button>
-          </div>
         </div>
         <DemandTableRows
           rows={filtered}
@@ -1464,7 +1523,7 @@ function Demands() {
           </div>
         </div>
       )}
-      {quickEditing && <div className="overlay confirm-overlay" onMouseDown={() => setQuickEditing(null)}><form className="demand-summary-modal" onMouseDown={event => event.stopPropagation()} onSubmit={saveQuickEdit}><div className="modal-head"><div><span className="modal-icon"><I.SlidersHorizontal/></span><div><h2>Atualizar evolução e planejamento</h2><p>{quickEditing.name} · {quickEditing.id}</p></div></div><button type="button" className="modal-close" onClick={() => setQuickEditing(null)} aria-label="Fechar"><I.X/></button></div><div className="modal-body"><div className="form-field"><label htmlFor="quickProgress">Evolução da demanda (%)</label><input id="quickProgress" type="number" min="0" max="100" step="1" required value={quickForm.progress} onChange={event => setQuickForm({ ...quickForm, progress: event.target.value })}/></div><div className="form-field"><label htmlFor="quickActualEffort">Esforço realizado (horas)</label><input id="quickActualEffort" type="number" min="0" step="0.5" value={quickForm.actualEffort} onChange={event => setQuickForm({ ...quickForm, actualEffort: event.target.value })}/></div><div className="form-field wide"><label htmlFor="quickDue">Prazo desejado</label><input id="quickDue" type="date" value={quickForm.due} onChange={event => setQuickForm({ ...quickForm, due: event.target.value })}/></div>{quickError && <p className="auth-error" role="alert">{quickError}</p>}</div><div className="modal-actions"><button type="button" className="ghost" onClick={() => setQuickEditing(null)}>Cancelar</button><button type="submit" className="primary"><I.Save/> Salvar alterações</button></div></form></div>}
+      {quickEditing && <div className="overlay confirm-overlay" onMouseDown={() => setQuickEditing(null)}><form className="demand-summary-modal" onMouseDown={event => event.stopPropagation()} onSubmit={saveQuickEdit}><div className="modal-head"><div><span className="modal-icon"><I.SlidersHorizontal/></span><div><h2>Atualizar evolução e planejamento</h2><p>{quickEditing.name} · {quickEditing.id}</p></div></div><button type="button" className="modal-close" onClick={() => setQuickEditing(null)} aria-label="Fechar"><I.X/></button></div><div className="modal-body"><div className="form-field"><label htmlFor="quickProgress">Evolução da demanda (%)</label><input id="quickProgress" type="number" min="0" max="100" step="1" required value={quickForm.progress} onChange={event => setQuickForm({ ...quickForm, progress: event.target.value })}/></div><div className="form-field"><label htmlFor="quickActualEffort">Esforço realizado (horas)</label><input id="quickActualEffort" type="number" min="0" step="0.5" value={quickForm.actualEffort} onChange={event => setQuickForm({ ...quickForm, actualEffort: event.target.value })}/></div><div className="form-field"><label htmlFor="quickType">Categoria</label><select id="quickType" value={quickForm.type} onChange={event => setQuickForm({ ...quickForm, type: event.target.value })}><option>Estratégica</option><option>Evolutiva</option><option>Bug</option><option>Incidente</option><option>Sustentação</option><option>Regulatória</option><option>Técnica</option><option>Emergencial</option></select></div><div className="form-field"><label htmlFor="quickOwner">Responsável</label><input id="quickOwner" value={quickForm.owner} onChange={event => setQuickForm({ ...quickForm, owner: event.target.value })} placeholder="Nome do responsável"/></div><div className="form-field wide"><label htmlFor="quickDue">Prazo desejado</label><input id="quickDue" type="date" value={quickForm.due} onChange={event => setQuickForm({ ...quickForm, due: event.target.value })}/></div>{quickError && <p className="auth-error" role="alert">{quickError}</p>}</div><div className="modal-actions"><button type="button" className="ghost" onClick={() => setQuickEditing(null)}>Cancelar</button><button type="submit" className="primary"><I.Save/> Salvar alterações</button></div></form></div>}
       {modal && (
         <div className="overlay demand-overlay" onMouseDown={close}>
           <form
@@ -1492,6 +1551,7 @@ function Demands() {
               >
                 <I.X />
               </button>
+              <button type="submit" className="primary demand-header-save"><I.Save/> Salvar</button>
             </div>
             <div className="modal-body">
               <div className="form-field wide">
@@ -1546,6 +1606,7 @@ function Demands() {
                 )}
               </div>
               <div className="form-field team-readonly"><label>Time responsável <I.Lock/></label><div><I.UsersRound/><span><b>{selectedProduct?.team || "Selecione um produto"}</b><small>{selectedProduct ? `Coordenador: ${selectedProduct.coordinator}` : "Preenchido automaticamente"}</small></span></div></div>
+              <div className="form-field"><label htmlFor="demandOwner">Responsável</label><input id="demandOwner" name="owner" value={form.owner} onChange={change} placeholder="Nome do responsável"/></div>
               <div className="form-field wide"><label>Recursos</label><div className="resource-selector">{!form.product?<p>Selecione um produto para visualizar os colaboradores da squad.</p>:availableResources.length===0?<p>Nenhum colaborador cadastrado para {selectedProduct?.team}.</p>:availableResources.map((person)=><label key={person.id} className={form.resourceIds.includes(person.id)?"selected":""}><input type="checkbox" checked={form.resourceIds.includes(person.id)} onChange={()=>setForm({...form,resourceIds:form.resourceIds.includes(person.id)?form.resourceIds.filter((id)=>id!==person.id):[...form.resourceIds,person.id]})}/><span className="avatar">{person.name.split(" ").map((x)=>x[0]).slice(0,2).join("")}</span><span><b>{person.name}</b><small>{person.role} · {person.total}h de capacidade</small></span></label>)}</div><small className="resource-help">{form.resourceIds.length} recurso(s) selecionado(s)</small></div>
               <div className="form-field">
                 <label>
@@ -1572,7 +1633,7 @@ function Demands() {
                   <option>Operações</option>
                 </select>
               </div>
-              <div className="form-field"><label>Versão</label><input name="version" value={form.version} onChange={change} placeholder="Ex.: 5.2"/></div>
+              <div className="form-field"><label htmlFor="artifactNumber">Número do Artefato</label><input id="artifactNumber" name="artifactNumber" value={form.artifactNumber} onChange={change} placeholder="Informe o número do artefato"/></div>
               <div className="form-field">
                 <label htmlFor="requester">
                   Solicitante <em>*</em>
@@ -1598,9 +1659,8 @@ function Demands() {
                   <option>Crítica</option>
                 </select>
               </div>
-              <div className="form-field"><label>Status</label><select name="status" value={form.status} onChange={change}><option>Backlog</option><option>Planejada</option><option>Em análise</option><option>Desenvolvimento</option><option>Em testes</option><option>Homologação</option><option>Concluído</option><option>Concluída</option><option>Cancelada</option><option>Bloqueada</option></select></div>
-              <div className="form-field"><label htmlFor="demandProgress">Evolução da demanda (%)</label><input id="demandProgress" type="number" name="progress" min="0" max="100" step="1" value={form.progress} onChange={(e)=>{const progress=String(Math.min(100,Math.max(0,Number(e.target.value))));setForm({...form,progress,status:Number(progress)===100?"Concluído":form.status})}}/><small className="resource-help">Ao atingir 100%, o status será alterado para Concluído.</small></div>
-              {!editing&&<div className="form-field"><label>Planejamento inicial</label><select name="planningQuarter" value={form.planningQuarter} onChange={change}><option value="Planejamento">Deixar em planejamento</option>{quarters.map((quarter)=><option key={quarter}>{quarter}</option>)}</select><small className="resource-help">O quarter pertence ao planejamento, não à demanda.</small></div>}
+              <div className="form-field"><label>Status</label><select name="status" value={form.status} onChange={change}><option>Não Iniciado</option><option>Backlog</option><option>Planejado</option><option>Em análise</option><option>Em Estudos</option><option>Em Desenvolvimento</option><option>Concluído</option><option>Cancelado</option><option>Bloqueado</option></select></div>
+              {!editing&&<div className="form-field"><label>Quarter Desejado</label><select name="planningQuarter" value={form.planningQuarter} onChange={change}><option value="Planejamento">Deixar em planejamento</option>{quarters.map((quarter)=><option key={quarter}>{quarter}</option>)}</select><small className="resource-help">O quarter pertence ao planejamento, não à demanda.</small></div>}
               <div className="form-field">
                 <label htmlFor="startDate">Data de início</label>
                 <input id="startDate" type="date" name="startDate" value={form.startDate} onChange={change}/>
@@ -1637,47 +1697,22 @@ function Demands() {
                 )}
               </div>
               <div className="form-field"><label htmlFor="actualEffort">Esforço realizado (horas)</label><input id="actualEffort" type="number" min="0" step="0.5" name="actualEffort" value={form.actualEffort} onChange={change} placeholder="Ainda não informado" className={errors.actualEffort ? "invalid" : ""}/>{errors.actualEffort && <small className="field-error">{errors.actualEffort}</small>}</div>
-              <div className="form-field wide">
+              <div className="form-field">
                 <label htmlFor="billable">Faturamento</label>
                 <select id="billable" name="billable" value={form.billable} onChange={change}>
                   <option value="false">Não faturável</option>
                   <option value="true">Faturável</option>
                 </select>
               </div>
-              <div className="form-field wide">
+              <div className="form-field">
                 <label htmlFor="billedAmount">Valor faturado (R$)</label>
                 <input id="billedAmount" name="billedAmount" type="number" min="0" step="0.01" value={form.billedAmount} onChange={change} disabled={form.billable !== "true"} placeholder="0,00" className={errors.billedAmount ? "invalid" : ""}/>
                 <small className="resource-help">Um valor maior que zero identifica a demanda como faturada. Deixe vazio ou zero enquanto não houver faturamento.</small>
                 {errors.billedAmount && <small className="field-error" role="alert">{errors.billedAmount}</small>}
               </div>
               <div className="form-field wide">
-                <label>Dependências</label>
-                <input
-                  name="dependencies"
-                  value={form.dependencies}
-                  onChange={change}
-                  placeholder="Outros times, sistemas ou demandas"
-                />
-              </div>
-              <div className="form-field">
-                <label>Justificativa</label>
-                <textarea
-                  name="justification"
-                  value={form.justification}
-                  onChange={change}
-                  rows={2}
-                  placeholder="Por que esta demanda é necessária?"
-                />
-              </div>
-              <div className="form-field">
-                <label>Impacto esperado</label>
-                <textarea
-                  name="impact"
-                  value={form.impact}
-                  onChange={change}
-                  rows={2}
-                  placeholder="Benefícios e resultados esperados"
-                />
+                <label htmlFor="demandNotes">Observação</label>
+                <textarea id="demandNotes" name="description" value={form.description} onChange={change} rows={3} placeholder="Informações adicionais sobre a demanda" />
               </div>
             </div>
             <div className="capacity-preview">
@@ -1777,8 +1812,9 @@ function DemandTableRows({
           </tr>
         </thead>
         <tbody>
-          {rows.map((d) => (
-            <tr key={d.id}>
+          {rows.map((d) => {
+            const status = displayDemandStatus(d.status);
+            return <tr key={d.id}>
               <td>
                 {onView ? <button className="demand-title-button" onClick={() => onView(d)}>{d.name}</button> : <b>{d.name}</b>}
                 <small>{d.id}</small>
@@ -1791,14 +1827,14 @@ function DemandTableRows({
               <td>
                 <Badge
                   tone={
-                    d.status === "Bloqueada"
+                    status === "Bloqueada"
                       ? "bad"
-                      : ["Concluído", "Concluída"].includes(d.status)
+                      : ["Concluído", "Concluída"].includes(status)
                         ? "good"
                         : "blue"
                   }
                 >
-                  {d.status}
+                  {status}
                 </Badge>
               </td>
               <td>{d.priority}</td>
@@ -1846,8 +1882,8 @@ function DemandTableRows({
                   </div>
                 </td>
               )}
-            </tr>
-          ))}
+            </tr>;
+          })}
         </tbody>
       </table>
     </div>
@@ -1859,6 +1895,7 @@ function Products() {
   const { products, setProducts } = useProducts();
   const { rows } = useDemands();
   const { team } = useTeam();
+  const sortedProducts = [...products].sort((a,b)=>Number(b.active)-Number(a.active)||a.name.localeCompare(b.name,"pt-BR"));
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState(emptyProduct);
@@ -1953,8 +1990,8 @@ function Products() {
           {products.filter((p) => p.active).length} ativos
         </Badge>
       </div>
-      <div className="product-grid">
-        {products.map((product) => {
+      <div className="tablewrap product-table-wrap"><table className="product-table"><thead><tr><th>Código</th><th>Produto</th><th>Time responsável</th><th>Coordenador</th><th>Demandas</th><th>Colaboradores</th><th>Status</th><th>Ações</th></tr></thead><tbody>
+        {sortedProducts.map((product) => {
           const demandsCount = rows.filter(
             (d) => d.product === product.name,
           ).length;
@@ -1962,29 +1999,18 @@ function Products() {
             (m) => m.product === product.name,
           ).length;
           return (
-            <Card className="product-card" key={product.id}>
-              <div className="product-code">{product.code}</div>
-              <div className="product-info">
-                <div>
-                  <h3>{product.name}</h3>
-                  <Badge tone={product.active ? "good" : "gray"}>
-                    {product.active ? "Ativo" : "Inativo"}
-                  </Badge>
-                </div>
-                <p>
-                  <I.UsersRound /> {product.team}
-                </p>
-                <p><I.UserRound /> Coordenador: {product.coordinator}</p>
-                <div>
-                  <span>
-                    <b>{demandsCount}</b> demandas
-                  </span>
-                  <span>
-                    <b>{staffCount}</b> colaboradores
-                  </span>
-                </div>
-              </div>
-              <div className="row-actions">
+            <tr className={product.active ? "" : "product-row-blocked"} key={product.id}>
+              <td><span className="product-code">{product.code}</span></td>
+              <td><b>{product.name}</b>{product.description&&<small className="product-description">{product.description}</small>}</td>
+              <td>{product.team}</td>
+              <td>{product.coordinator}</td>
+              <td>{demandsCount}</td>
+              <td>{staffCount}</td>
+              <td><Badge tone={product.active ? "good" : "gray"}>{product.active ? "Ativo" : "Bloqueado"}</Badge></td>
+              <td><div className="row-actions">
+                <button className={product.active?"product-toggle":"product-toggle is-blocked"} title={product.active?"Bloquear produto":"Ativar produto"} aria-label={product.active?`Bloquear produto ${product.name}`:`Ativar produto ${product.name}`} aria-pressed={product.active} onClick={()=>setProducts(current=>current.map(item=>item.id===product.id?{...item,active:!item.active}:item))}>
+                  {product.active?<I.CirclePause/>:<I.CirclePlay/>}
+                </button>
                 <button
                   title="Editar produto"
                   onClick={() => openEdit(product)}
@@ -1998,11 +2024,11 @@ function Products() {
                 >
                   <I.Trash2 />
                 </button>
-              </div>
-            </Card>
+              </div></td>
+            </tr>
           );
         })}
-      </div>
+      </tbody></table></div>
       {error && !modal && (
         <div className="toast-success product-error">
           <I.CircleAlert />
@@ -2104,6 +2130,7 @@ type Staff = {
   product: string;
   total: number;
   used: number;
+  active?: boolean;
 };
 function normalizeStaffRole(role: string) {
   const normalized = role.trim().toUpperCase();
@@ -2115,21 +2142,22 @@ const initialStaff: Staff[] = capacitySeed.map(person => ({ ...person, role: nor
 function replaceRegisteredStaff() {
   try {
     if (localStorage.getItem("dev-plan:team-spreadsheet-v1")) return;
-    localStorage.setItem("dev-plan:team", JSON.stringify(initialStaff));
-    const demandsRaw = localStorage.getItem("dev-plan:demands");
-    if (demandsRaw) {
-      const storedDemands: Demand[] = JSON.parse(demandsRaw);
-      localStorage.setItem("dev-plan:demands", JSON.stringify(storedDemands.map(demand => ({ ...demand, resourceIds: [] }))));
-    }
-    const roadmapRaw = localStorage.getItem("dev-plan:roadmap");
-    if (roadmapRaw) {
-      const entries: RoadmapEntry[] = JSON.parse(roadmapRaw);
-      localStorage.setItem("dev-plan:roadmap", JSON.stringify(entries.map(entry => ({ ...entry, collaborators: [], allocations: [] }))));
-    }
+    if (localStorage.getItem("dev-plan:team") === null) localStorage.setItem("dev-plan:team", JSON.stringify(initialStaff));
     localStorage.setItem("dev-plan:team-spreadsheet-v1", "1");
   } catch { /* A lista da planilha continua disponível sem armazenamento local. */ }
 }
 replaceRegisteredStaff();
+function setQuarterlyStaffCapacity() {
+  const migrationKey = "dev-plan:quarterly-capacity-400-v1";
+  try {
+    if (localStorage.getItem(migrationKey)) return;
+    const raw = localStorage.getItem("dev-plan:team");
+    const stored: Staff[] = raw ? JSON.parse(raw) : initialStaff;
+    localStorage.setItem("dev-plan:team", JSON.stringify(stored.map(person => ({ ...person, total: 400 }))));
+    localStorage.setItem(migrationKey, "1");
+  } catch { /* Mantém os dados se o armazenamento local estiver indisponível. */ }
+}
+setQuarterlyStaffCapacity();
 function correctStaffProductsFromSpreadsheet() {
   try {
     if (localStorage.getItem("dev-plan:team-products-v2")) return;
@@ -2178,7 +2206,7 @@ const emptyStaff = {
   name: "",
   role: "Backend",
   product: "",
-  total: "130",
+  total: "400",
   used: "0",
 };
 function Capacity() {
@@ -2220,13 +2248,15 @@ function Capacity() {
   const allocatedDemandHours = (person: Staff) =>
     demandAllocations(person).reduce((sum, item) => sum + item.hours, 0);
   const effectiveUsed = (person: Staff) => allocatedDemandHours(person);
-  const filteredTeam=productFilter==="Todos"?team:team.filter((person)=>person.product===productFilter);
-  const total = filteredTeam.reduce((sum, m) => sum + m.total, 0);
-  const used = filteredTeam.reduce((sum, m) => sum + effectiveUsed(m), 0);
+  const filteredTeam=[...(productFilter==="Todos"?team:team.filter((person)=>person.product===productFilter))].sort((a,b)=>Number(b.active!==false)-Number(a.active!==false)||a.name.localeCompare(b.name,"pt-BR"));
+  const activeTeam=filteredTeam.filter(person=>person.active!==false);
+  const total = activeTeam.reduce((sum, m) => sum + m.total, 0);
+  const used = activeTeam.reduce((sum, m) => sum + effectiveUsed(m), 0);
   const free = total - used;
-  const overloaded = filteredTeam.filter((m) => effectiveUsed(m) / m.total > 0.9).length;
+  const overloaded = activeTeam.filter((m) => effectiveUsed(m) / m.total > 0.9).length;
+  const toggleStaff=(staff:Staff)=>setTeam(current=>current.map(person=>person.id===staff.id?{...person,active:person.active===false}:person));
   const allocatedDemands=allocationFor?demandAllocations(allocationFor):[];
-  const importCapacity=async(e:React.ChangeEvent<HTMLInputElement>)=>{const file=e.target.files?.[0];if(!file)return;setImporting(true);setImportFeedback("");try{const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await file.arrayBuffer());const sheet=workbook.worksheets[0];if(!sheet)throw new Error();const headers:Record<number,string>={};sheet.getRow(1).eachCell((cell,col)=>headers[col]=cell.text.trim().toLowerCase());const get=(row:ExcelJS.Row,names:string[])=>{const col=Object.entries(headers).find(([,header])=>names.includes(header))?.[0];return col?row.getCell(Number(col)).text.trim():""};const incoming:Staff[]=[];let ignored=0;sheet.eachRow((row,index)=>{if(index===1)return;const name=get(row,["colaborador","nome","nome completo"]);const productText=get(row,["produto"]);const product=products.find((item)=>item.name.toLowerCase()===productText.toLowerCase()&&item.active);const total=Number(get(row,["capacidade","capacidade total","horas disponíveis","horas disponiveis"]).replace(",","."));if(!name||!product||!total){ignored++;return}incoming.push({id:Date.now()+index,name,role:normalizeStaffRole(get(row,["função","funcao","cargo"])||"Desenvolvedor"),product:product.name,total,used:Number(get(row,["horas alocadas","alocada","alocação","alocacao"]).replace(",","."))||0})});setTeam((current)=>{const next=[...current];incoming.forEach((person)=>{const found=next.findIndex((item)=>item.name.toLowerCase()===person.name.toLowerCase());if(found>=0)next[found]={...person,id:next[found].id};else next.push(person)});return next});setImportFeedback(`${incoming.length} capacidade(s) importada(s)${ignored?` · ${ignored} linha(s) ignorada(s)`:""}.`)}catch{setImportFeedback("Não foi possível ler a planilha de capacidade.")}finally{setImporting(false);e.target.value=""}};
+  const importCapacity=async(e:React.ChangeEvent<HTMLInputElement>)=>{const file=e.target.files?.[0];if(!file)return;setImporting(true);setImportFeedback("");try{const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await file.arrayBuffer());const sheet=workbook.worksheets[0];if(!sheet)throw new Error();const headers:Record<number,string>={};sheet.getRow(1).eachCell((cell,col)=>headers[col]=cell.text.trim().toLowerCase());const get=(row:ExcelJS.Row,names:string[])=>{const col=Object.entries(headers).find(([,header])=>names.includes(header))?.[0];return col?row.getCell(Number(col)).text.trim():""};const incoming:Staff[]=[];let ignored=0;sheet.eachRow((row,index)=>{if(index===1)return;const name=get(row,["colaborador","nome","nome completo"]);const productText=get(row,["produto"]);const product=products.find((item)=>item.name.toLowerCase()===productText.toLowerCase()&&item.active);const total=Number(get(row,["capacidade","capacidade total","horas disponíveis","horas disponiveis"]).replace(",","."));if(!name||!product||!total){ignored++;return}incoming.push({id:Date.now()+index,name,role:normalizeStaffRole(get(row,["função","funcao","cargo"])||"Desenvolvedor"),product:product.name,total,used:Number(get(row,["horas alocadas","alocada","alocação","alocacao"]).replace(",","."))||0})});setTeam((current)=>{const next=[...current];incoming.forEach((person)=>{const found=next.findIndex((item)=>item.name.toLowerCase()===person.name.toLowerCase());if(found>=0)next[found]={...person,id:next[found].id,active:next[found].active};else next.push(person)});return next});setImportFeedback(`${incoming.length} capacidade(s) importada(s)${ignored?` · ${ignored} linha(s) ignorada(s)`:""}.`)}catch{setImportFeedback("Não foi possível ler a planilha de capacidade.")}finally{setImporting(false);e.target.value=""}};
   const openNew = () => {
     setEditing(null);
     setForm(emptyStaff);
@@ -2273,6 +2303,7 @@ function Capacity() {
       product: form.product,
       total: cap,
       used: allocation,
+      active: editing?.active,
     };
     setTeam(
       editing
@@ -2304,12 +2335,12 @@ function Capacity() {
         action={<div className="capacity-actions"><button className="ghost" onClick={()=>fileRef.current?.click()} disabled={importing}>{importing?<I.LoaderCircle className="spin"/>:<I.FileSpreadsheet/>}{importing?"Importando...":"Importar Excel"}</button><input ref={fileRef} type="file" accept=".xlsx,.xls" hidden onChange={importCapacity}/><button className="primary" onClick={openNew}><I.UserPlus /> Novo colaborador</button></div>}
       />
       {importFeedback&&<div className="import-feedback"><I.CircleCheck/><span>{importFeedback}</span><button onClick={()=>setImportFeedback("")}><I.X/></button></div>}
-      <div className="capacity-filter"><div><I.Boxes/><span><b>Capacidade por produto</b><small>Filtre os indicadores e colaboradores</small></span></div><select value={productFilter} onChange={(e)=>setProductFilter(e.target.value)}><option>Todos</option>{Array.from(new Set([...products.filter(product=>product.active).map(product=>product.name),...team.map(person=>person.product)])).filter(Boolean).map(name=><option key={name} value={name}>{name}</option>)}</select></div>
+      <div className="capacity-filter"><div><I.Boxes/><span><b>Capacidade por produto</b><small>Filtre os indicadores e colaboradores</small></span></div><select value={productFilter} onChange={(e)=>setProductFilter(e.target.value)}><option>Todos</option>{products.filter(product=>product.active).map(product=><option key={product.id} value={product.name}>{product.name}</option>)}</select></div>
       <div className="kpis compact">
         <Card>
           <span>Capacidade total</span>
           <strong>{total}h</strong>
-          <small>{filteredTeam.length} colaboradores</small>
+          <small>{activeTeam.length} ativos · {filteredTeam.length-activeTeam.length} bloqueados</small>
         </Card>
         <Card>
           <span>Alocada</span>
@@ -2337,17 +2368,18 @@ function Capacity() {
         <div className="cardhead">
           <div>
             <h3>Alocação por colaborador</h3>
-            <p>Capacidade planejada para setembro</p>
+            <p>Capacidade trimestral para {currentQuarter}</p>
           </div>
-          <Badge tone="gray">{filteredTeam.length} pessoas</Badge>
+          <Badge tone="gray">{activeTeam.length} ativos · {filteredTeam.length-activeTeam.length} bloqueados</Badge>
         </div>
         <div className="people">
           {filteredTeam.map((m) => {
+            const active=m.active!==false;
             const allocated=effectiveUsed(m);
             const demandHours=allocatedDemandHours(m);
             const pct = Math.round((allocated / m.total) * 100);
             return (
-              <div className="member member-managed" key={m.id}>
+              <div className={"member member-managed "+(active?"":"member-blocked")} key={m.id}>
                 <span className="avatar">
                   {m.name
                     .split(" ")
@@ -2360,6 +2392,7 @@ function Capacity() {
                   <small>
                     {m.role} · {m.product}
                   </small>
+                  {!active&&<small className="staff-status-blocked">Bloqueado para capacidade</small>}
                 </div>
                 <div className="usage">
                   <div className="usage-bar" role="button" tabIndex={0} title="Ver demandas alocadas" onClick={()=>setAllocationFor(m)} onKeyDown={(e)=>{if(e.key==="Enter")setAllocationFor(m)}}>
@@ -2378,6 +2411,15 @@ function Capacity() {
                   {m.total - allocated}h livres
                 </span>
                 <div className="row-actions">
+                  <button
+                    className={active?"staff-capacity-toggle":"staff-capacity-toggle is-blocked"}
+                    title={active?"Bloquear como capacidade do time":"Ativar como capacidade do time"}
+                    aria-label={active?`Bloquear ${m.name} como capacidade do time`:`Ativar ${m.name} como capacidade do time`}
+                    aria-pressed={active}
+                    onClick={() => toggleStaff(m)}
+                  >
+                    {active?<I.CirclePause/>:<I.CirclePlay/>}
+                  </button>
                   <button
                     title="Editar colaborador"
                     onClick={() => openEdit(m)}
@@ -2477,11 +2519,10 @@ function Capacity() {
                         {product.name}
                       </option>
                     ))}
-                  {form.product && !products.some(product => product.name === form.product && product.active) && <option value={form.product}>{form.product} (planilha)</option>}
                 </select>
               </div>
               <div className="form-field">
-                <label>Capacidade (horas)</label>
+                <label>Capacidade trimestral (horas)</label>
                 <input
                   type="number"
                   min="1"
@@ -2557,17 +2598,21 @@ function Planning() {
   const [statusFilter, setStatusFilter] = useState("Todos");
   const quarterByDemand = new Map(roadmap.map(entry => [entry.demandId, entry.quarter]));
   const quarterFor = (demand: Demand) => quarterByDemand.get(demand.id) || "Sem quarter";
-  const productOptions = Array.from(new Set([...products.map(product => product.name), ...rows.map(demand => demand.product)])).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const productOptions = products.filter(product => product.active).map(product => product.name).sort((a, b) => a.localeCompare(b, "pt-BR"));
   const quarterOptions = Array.from(new Set([...quarters, ...roadmap.map(entry => entry.quarter)])).sort((a, b) => a.slice(3).localeCompare(b.slice(3)) || a.localeCompare(b));
-  const statusOptions = Array.from(new Set(rows.map(demand => demand.status))).sort((a, b) => a.localeCompare(b, "pt-BR"));
-  const filtered = rows.filter(demand =>
+  const deliveryRows = rows.filter(demand => displayDemandStatus(demand.status) !== "Não Iniciado");
+  const statusOptions = Array.from(new Set(deliveryRows.map(demand => displayDemandStatus(demand.status)))).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const filtered = deliveryRows.filter(demand =>
     (productFilter === "Todos" || demand.product === productFilter) &&
     (quarterFilter === "Todos" || quarterFor(demand) === quarterFilter) &&
-    (statusFilter === "Todos" || demand.status === statusFilter)
-  );
+    (statusFilter === "Todos" || displayDemandStatus(demand.status) === statusFilter)
+  ).sort((a,b)=>{
+    const rank=(status:string)=>({"Concluído":0,"Concluída":0,"Em Desenvolvimento":1}[displayDemandStatus(status)]??2);
+    return rank(a.status)-rank(b.status)||a.name.localeCompare(b.name,"pt-BR");
+  });
   const hasFilters = productFilter !== "Todos" || quarterFilter !== "Todos" || statusFilter !== "Todos";
   return <>
-    <PageHead title="Planejamento" desc="Acompanhe as demandas por produto, quarter e status." />
+    <PageHead title="Visibilidade Entregas" desc="Acompanhe as demandas por produto, quarter e status." />
     <div className="planning-filters">
       <label>Produto<select value={productFilter} onChange={event => setProductFilter(event.target.value)}><option value="Todos">Todos os produtos</option>{productOptions.map(product => <option key={product}>{product}</option>)}</select></label>
       <label>Quarter<select value={quarterFilter} onChange={event => setQuarterFilter(event.target.value)}><option value="Todos">Todos os quarters</option><option>Sem quarter</option>{quarterOptions.map(quarter => <option key={quarter}>{quarter}</option>)}</select></label>
@@ -2575,25 +2620,18 @@ function Planning() {
       {hasFilters && <button className="ghost" onClick={() => { setProductFilter("Todos"); setQuarterFilter("Todos"); setStatusFilter("Todos"); }}><I.X /> Limpar filtros</button>}
       <span role="status">{filtered.length} de {rows.length} demandas</span>
     </div>
-    {filtered.length ? <div className="planning-cards">
+    {filtered.length ? <Card><div className="tablewrap planning-table-wrap"><table className="planning-table"><thead><tr><th>ID</th><th>Demanda</th><th>Produto</th><th>Quarter</th><th>Responsável</th><th>Prioridade</th><th>Prazo</th><th>Status</th><th>Esforço</th><th>Evolução</th></tr></thead><tbody>
       {filtered.map(demand => {
         const progress = Math.min(100, Math.max(0, demand.progress || 0));
-        const completed = ["Concluído", "Concluída"].includes(demand.status) || progress === 100;
+        const status = displayDemandStatus(demand.status);
+        const completed = ["Concluído", "Concluída"].includes(status) || progress === 100;
+        const blocked = status === "Bloqueada";
         const due = demand.dueDate ? new Date(`${demand.dueDate}T12:00:00`).toLocaleDateString("pt-BR") : demand.due || "Sem prazo";
-        return <article className="planning-demand-card" key={demand.id}>
-          <div className="planning-card-top"><span>{demand.id}</span><Badge tone={completed ? "good" : demand.status === "Bloqueada" ? "bad" : "blue"}>{demand.status}</Badge></div>
-          <h3>{demand.name}</h3>
-          <div className="planning-card-tags"><span><I.Boxes aria-hidden="true" />{demand.product}</span><span><I.CalendarRange aria-hidden="true" />{quarterFor(demand)}</span></div>
-          <dl>
-            <div><dt>Responsável</dt><dd>{demand.owner || "Não informado"}</dd></div>
-            <div><dt>Prioridade</dt><dd>{demand.priority}</dd></div>
-            <div><dt>Prazo</dt><dd>{due}</dd></div>
-            <div><dt>Esforço estimado</dt><dd>{demand.effort}h</dd></div>
-          </dl>
-          <div className="planning-card-progress"><span>Evolução <b>{progress}%</b></span><progress max="100" value={progress} aria-label={`Evolução de ${demand.name}`} /></div>
-        </article>;
+        return <tr className={completed ? "planning-row-completed" : blocked ? "planning-row-blocked" : progress > 0 ? "planning-row-active" : "planning-row-pending"} key={demand.id}>
+          <td>{demand.id}</td><td><b>{demand.name}</b></td><td>{demand.product}</td><td>{quarterFor(demand)}</td><td>{demand.owner || "Não informado"}</td><td>{demand.priority}</td><td>{due}</td><td><Badge tone={completed ? "good" : blocked ? "bad" : "blue"}>{status}</Badge></td><td>{demand.effort}h</td><td><div className="planning-row-progress"><progress max="100" value={progress} aria-label={`Evolução de ${demand.name}`} /><b>{progress}%</b></div></td>
+        </tr>;
       })}
-    </div> : <Card><div className="planning-empty"><I.ListTodo aria-hidden="true" /><b>{rows.length ? "Nenhuma demanda encontrada" : "Nenhuma demanda cadastrada"}</b><p>{rows.length ? "Altere ou limpe os filtros para visualizar outras demandas." : "Cadastre demandas na Gestão de demandas para acompanhar o planejamento."}</p></div></Card>}
+    </tbody></table></div></Card> : <Card><div className="planning-empty"><I.ListTodo aria-hidden="true" /><b>{rows.length ? "Nenhuma demanda encontrada" : "Nenhuma demanda cadastrada"}</b><p>{rows.length ? "Altere ou limpe os filtros para visualizar outras demandas." : "Cadastre demandas na Gestão de demandas para acompanhar o planejamento."}</p></div></Card>}
   </>;
 }
 function Risks() {
@@ -2742,12 +2780,59 @@ function LegacyChanges() {
     </>
   );
 }
+const initiativeStatuses: InitiativeStatus[] = ["Não iniciada", "Em andamento", "Concluída", "Bloqueada"];
+const emptyInitiative: Omit<Initiative, "id"> = { name: "", status: "Não iniciada", startDate: "", endDate: "", owner: "", observation: "", progress: 0 };
+function Initiatives({readOnly=false}:{readOnly?:boolean}) {
+  const [initiatives,setInitiatives]=usePersistentState<Initiative[]>("dev-plan:initiatives",[]);
+  const [editing,setEditing]=useState<Initiative|null>(null);
+  const [form,setForm]=useState<Omit<Initiative,"id">>(emptyInitiative);
+  const [modal,setModal]=useState(false);
+  const [error,setError]=useState("");
+  const [statusFilter,setStatusFilter]=useState("Todos"); const [dateFrom,setDateFrom]=useState(""); const [dateTo,setDateTo]=useState("");
+  const openNew=()=>{setEditing(null);setForm(emptyInitiative);setError("");setModal(true)};
+  const openEdit=(initiative:Initiative)=>{setEditing(initiative);setForm({name:initiative.name,status:initiative.status,startDate:initiative.startDate,endDate:initiative.endDate,owner:initiative.owner,observation:initiative.observation,progress:initiative.progress??0});setError("");setModal(true)};
+  const close=()=>{setModal(false);setEditing(null);setError("")};
+  const submit=(event:React.FormEvent)=>{event.preventDefault();setError("");if(!form.name.trim()||!form.owner.trim()||!form.startDate||!form.endDate){setError("Preencha nome, responsável e período da iniciativa.");return}if(form.endDate<form.startDate){setError("A data de fim deve ser igual ou posterior à data de início.");return}if(!Number.isInteger(form.progress)||form.progress<0||form.progress>100){setError("Informe uma evolução entre 0% e 100%.");return}const item:Initiative={...form,id:editing?.id||crypto.randomUUID(),name:form.name.trim(),owner:form.owner.trim(),observation:form.observation.trim(),progress:Number(form.progress)};setInitiatives(current=>editing?current.map(value=>value.id===editing.id?item:value):[item,...current]);close()};
+  const changeStatus=(id:string,status:InitiativeStatus)=>setInitiatives(current=>current.map(item=>item.id===id?{...item,status}:item));
+  const formatDate=(value:string)=>value?new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR"):"Não definida";
+  const filteredInitiatives=initiatives.filter(item=>(statusFilter==="Todos"||item.status===statusFilter)&&(!dateFrom||item.endDate>=dateFrom)&&(!dateTo||item.startDate<=dateTo));
+  const visibleStatuses=statusFilter==="Todos"?initiativeStatuses:initiativeStatuses.filter(status=>status===statusFilter);
+  const deadlineState=(initiative:Initiative)=>{if(initiative.status==="Concluída")return {state:"on-time",label:"Concluída"};const today=new Date();today.setHours(0,0,0,0);const start=new Date(`${initiative.startDate}T00:00:00`);const end=new Date(`${initiative.endDate}T00:00:00`);if(today>end)return {state:"late",label:"Prazo vencido"};const total=Math.max(1,end.getTime()-start.getTime());const remaining=end.getTime()-today.getTime();return remaining/total<=0.2?{state:"warning",label:"Últimos 20% do prazo"}:{state:"on-time",label:"Dentro do prazo"};};
+  return <>
+    <PageHead title="Iniciativas" desc="Acompanhe estudos e iniciativas sem consumir capacidade do time." action={<button className="primary" onClick={openNew}><I.Plus/> Nova iniciativa</button>}/>
+    <div className="initiative-filters"><label>Status<select value={statusFilter} onChange={event=>setStatusFilter(event.target.value)}><option>Todos</option>{initiativeStatuses.map(status=><option key={status}>{status}</option>)}</select></label><label>Período — início<input type="date" value={dateFrom} onChange={event=>setDateFrom(event.target.value)} aria-label="Início do período de filtro"/></label><label>Período — fim<input type="date" value={dateTo} onChange={event=>setDateTo(event.target.value)} aria-label="Fim do período de filtro"/></label>{(statusFilter!=="Todos"||dateFrom||dateTo)&&<button className="ghost" onClick={()=>{setStatusFilter("Todos");setDateFrom("");setDateTo("")}}><I.X/> Limpar filtros</button>}<span>{filteredInitiatives.length} de {initiatives.length} iniciativa(s)</span></div>
+    <div className="initiative-board">{visibleStatuses.map(status=>{const items=filteredInitiatives.filter(item=>item.status===status);return <section className="initiative-column" key={status} onDragOver={event=>{if(!readOnly)event.preventDefault()}} onDrop={event=>{if(readOnly)return;event.preventDefault();const id=event.dataTransfer.getData("text/plain");if(id)changeStatus(id,status)}}>
+      <header><div><h2>{status}</h2><small>{items.length} iniciativa(s)</small></div><Badge tone={status==="Concluída"?"good":status==="Bloqueada"?"bad":status==="Em andamento"?"blue":"gray"}>{items.length}</Badge></header>
+      <div className="initiative-column-body">{items.map(item=>{const deadline=deadlineState(item);return <article className={"initiative-card deadline-"+deadline.state} key={item.id} draggable={!readOnly} onDragStart={event=>{event.dataTransfer.setData("text/plain",item.id);event.dataTransfer.effectAllowed="move"}}>
+        <div className="initiative-card-title"><b>{item.name}</b><div className="row-actions"><button title="Editar iniciativa" aria-label={`Editar ${item.name}`} onClick={()=>openEdit(item)}><I.Pencil/></button><button className="delete" title="Excluir iniciativa" aria-label={`Excluir ${item.name}`} onClick={()=>setInitiatives(current=>current.filter(value=>value.id!==item.id))}><I.Trash2/></button></div></div>
+        <div className="initiative-deadline-label"><I.Clock3/><span>{deadline.label}</span></div>
+        <div className="initiative-card-dates"><span><I.CalendarDays/> Início <b>{formatDate(item.startDate)}</b></span><span><I.CalendarDays/> Fim <b>{formatDate(item.endDate)}</b></span></div><div className="initiative-progress"><div><span>Evolução</span><b>{item.progress??0}%</b></div><progress max="100" value={item.progress??0}/></div>
+        <div className="initiative-owner"><I.UserRound/><span>Responsável<b>{item.owner}</b></span></div>
+        {item.observation&&<p className="initiative-observation">{item.observation}</p>}
+        <label className="initiative-status-select">Mover para<select disabled={readOnly} value={item.status} onChange={event=>changeStatus(item.id,event.target.value as InitiativeStatus)}>{initiativeStatuses.map(option=><option key={option}>{option}</option>)}</select></label>
+      </article>})}{items.length===0&&<div className="initiative-column-empty">{statusFilter!=="Todos"||dateFrom||dateTo?"Nenhuma iniciativa corresponde aos filtros.":"Solte uma iniciativa aqui ou crie uma nova."}</div>}</div>
+    </section>})}</div>
+    {modal&&<div className="overlay confirm-overlay" onMouseDown={close}><form className="staff-modal initiative-modal" onMouseDown={event=>event.stopPropagation()} onSubmit={submit}>
+      <div className="modal-head"><div><span className="modal-icon"><I.Lightbulb/></span><div><h2>{editing?"Editar iniciativa":"Nova iniciativa"}</h2><p>Estudos não alteram a capacidade nem o planejamento de demandas.</p></div></div><button type="button" className="modal-close" onClick={close}><I.X/></button></div>
+      <div className="initiative-form">
+        <label className="wide">Nome da iniciativa<input autoFocus required value={form.name} onChange={event=>setForm({...form,name:event.target.value})}/></label>
+        <label>Status<select value={form.status} onChange={event=>setForm({...form,status:event.target.value as InitiativeStatus})}>{initiativeStatuses.map(status=><option key={status}>{status}</option>)}</select></label>
+        <label>Responsável<input required value={form.owner} onChange={event=>setForm({...form,owner:event.target.value})}/></label>
+        <label>Data de início<input type="date" required value={form.startDate} onChange={event=>setForm({...form,startDate:event.target.value})}/></label>
+        <label>Data de fim<input type="date" required value={form.endDate} onChange={event=>setForm({...form,endDate:event.target.value})}/></label>
+        <label>Evolução (%)<input type="number" min="0" max="100" step="1" required value={form.progress} onChange={event=>setForm({...form,progress:Number(event.target.value)})}/></label><label className="wide">Observação<textarea rows={4} value={form.observation} onChange={event=>setForm({...form,observation:event.target.value})}/></label>
+        {error&&<div className="staff-error"><I.CircleAlert/>{error}</div>}
+      </div>
+      <div className="modal-actions"><button type="button" className="ghost" onClick={close}>Cancelar</button><button className="primary" type="submit"><I.Save/> Salvar iniciativa</button></div>
+    </form></div>}
+  </>;
+}
 function RoadmapComparison(){
   const {rows,roadmap,versions}=useDemands();
-  const versionedQuarters=Array.from(new Set(versions.map((item)=>item.quarter)));
-  const [quarter,setQuarter]=useState(versionedQuarters[0]||"Q3 2026");
+  const [quarter,setQuarter]=useState(currentQuarter);
+  const [versionFilter,setVersionFilter]=useState("");
   const quarterVersions=versions.filter((item)=>item.quarter===quarter).sort((a,b)=>a.version-b.version);
-  const baseline=quarterVersions[0];
+  const baseline=quarterVersions.find((item)=>String(item.id)===versionFilter)||quarterVersions[0];
   const currentEntries=roadmap.filter((item)=>item.quarter===quarter);
   const initialIds=new Set(baseline?.entries.map((item)=>item.demandId)||[]);
   const currentIds=new Set(currentEntries.map((item)=>item.demandId));
@@ -2759,20 +2844,20 @@ function RoadmapComparison(){
     return {id,demand,initialEntry,currentEntry,status};
   });
   return <><PageHead title="Comparação do Roadmap" desc="Compare o primeiro planejamento preservado com a versão atualmente em execução."/>
-    <div className="changes-filters"><div><I.GitCompareArrows/><span><b>Baseline versus execução</b><small>{baseline?`V${baseline.version} criada em ${baseline.createdAt}`:"Crie a primeira versão no Roadmap"}</small></span></div><label>Quarter<select value={quarter} onChange={(e)=>setQuarter(e.target.value)}>{(versionedQuarters.length?versionedQuarters:quarters).map((item)=><option key={item}>{item}</option>)}</select></label></div>
+    <div className="changes-filters"><div><I.GitCompareArrows/><span><b>Versão de referência versus execução</b><small>{baseline?`V${baseline.version} criada em ${baseline.createdAt}`:"Crie uma versão para este quarter no Roadmap"}</small></span></div><label>Quarter<select value={quarter} onChange={(e)=>{setQuarter(e.target.value);setVersionFilter("")}}>{quarters.map((item)=><option key={item}>{item}</option>)}</select></label><label>Versão<select value={baseline?String(baseline.id):""} onChange={(e)=>setVersionFilter(e.target.value)}><option value="">Selecione uma versão</option>{quarterVersions.map(item=><option key={item.id} value={item.id}>V{item.version} · {item.createdAt}</option>)}</select></label></div>
     {!baseline?<Card><div className="changes-empty"><I.History/><b>Nenhuma versão inicial registrada</b><span>Acesse o Roadmap trimestral e clique em “Criar versão” para preservar o primeiro planejamento.</span></div></Card>:<><div className="kpis compact"><Card><span>Versão inicial</span><strong>V{baseline.version}</strong><small>{baseline.entries.length} demandas</small></Card><Card><span>Em execução</span><strong>{currentEntries.length}</strong><small>demandas atuais</small></Card><Card><span>Novas demandas</span><strong>{comparison.filter((item)=>item.status==="Adicionada").length}</strong><small>após o planejamento</small></Card><Card><span>Removidas/ajustadas</span><strong>{comparison.filter((item)=>["Removida","Ajustada"].includes(item.status)).length}</strong><small>mudanças identificadas</small></Card></div><Card><div className="tablewrap"><table><thead><tr><th>Demanda</th><th>Produto</th><th>Versão inicial</th><th>Em execução</th><th>Comparação</th></tr></thead><tbody>{comparison.map((item)=><tr key={item.id}><td><b>{item.demand?.name||item.id}</b><small>{item.id}</small></td><td>{item.demand?.product||"—"}</td><td>{item.initialEntry?`${item.initialEntry.allocations.reduce((sum,a)=>sum+a.hours,0)}h alocadas`:"Não constava"}</td><td>{item.currentEntry?`${item.currentEntry.allocations.reduce((sum,a)=>sum+a.hours,0)}h alocadas`:"Removida"}</td><td><Badge tone={item.status==="Adicionada"?"good":item.status==="Removida"?"bad":item.status==="Ajustada"?"warn":"gray"}>{item.status}</Badge></td></tr>)}</tbody></table></div></Card></>}
   </>;
 }
 
 function Changes(){
-  const {history,rows,versions}=useDemands();
+  const {history,rows,versions,setHistory}=useDemands();
   const {products}=useProducts();
   const [product,setProduct]=useState("Todos");
   const [quarter,setQuarter]=useState("Todos");
   const [selectedVersion,setSelectedVersion]=useState<RoadmapVersion|null>(null);
   const filtered=history.filter((item)=>(product==="Todos"||item.product===product)&&(quarter==="Todos"||item.quarter===quarter));
   const versionFromLog=(item:ChangeLog)=>{const number=Number(item.title.match(/Versão V(\d+)/)?.[1]);return number?versions.find((version)=>version.version===number&&(!item.quarter||version.quarter===item.quarter)):undefined};
-  return <><PageHead title="Auditoria do Roadmap" desc="Histórico automático de versões, inclusões, movimentações, remoções e alocações."/><div className="changes-filters"><div><I.Filter/><span><b>Filtrar auditoria</b><small>{filtered.length} de {history.length} alterações</small></span></div><label>Produto<select value={product} onChange={(e)=>setProduct(e.target.value)}><option>Todos</option>{products.map((item)=><option key={item.id} value={item.name}>{item.name}</option>)}</select></label><label>Quarter<select value={quarter} onChange={(e)=>setQuarter(e.target.value)}><option value="Todos">Quarter</option>{quarters.map((item)=><option key={item}>{item}</option>)}</select></label>{(product!=="Todos"||quarter!=="Todos")&&<button onClick={()=>{setProduct("Todos");setQuarter("Todos")}}><I.X/> Limpar</button>}</div><Card>{filtered.length===0?<div className="changes-empty"><I.History/><b>Nenhuma alteração encontrada</b><span>{history.length?"Altere ou limpe os filtros para visualizar outros registros.":"As ações realizadas no Roadmap aparecerão automaticamente aqui."}</span></div>:filtered.map((item)=>{const storedVersion=versionFromLog(item);return <div className="change" key={item.id}><div className={`changeicon log-${item.tone}`}>{item.tone==="good"?<I.Plus/>:item.tone==="bad"?<I.Trash2/>:item.tone==="warn"?<I.ArrowRightLeft/>:<I.Users/>}</div><div><small>{item.date}</small>{storedVersion?<button className="audit-version-button" onClick={()=>setSelectedVersion(storedVersion)}>{item.title}<I.ExternalLink/></button>:<b>{item.title}</b>}<span>por {item.actor}{item.product?` · ${item.product}`:""}{item.quarter?` · ${item.quarter}`:""}</span>{(item.demandId||item.demandName)&&<span className="change-demand"><I.ListTodo/> Demanda: <b>{item.demandName||rows.find((d)=>d.id===item.demandId)?.name||item.demandId}</b>{item.demandId&&` (${item.demandId})`}</span>}</div><Badge tone={item.tone}>{item.detail}</Badge></div>})}</Card>
+  return <><PageHead title="Auditoria do Roadmap" desc="Histórico automático de versões, inclusões, movimentações, remoções e alocações."/><div className="changes-filters"><div><I.Filter/><span><b>Filtrar auditoria</b><small>{filtered.length} de {history.length} alterações</small></span></div><label>Produto<select value={product} onChange={(e)=>setProduct(e.target.value)}><option>Todos</option>{products.filter(item=>item.active).map((item)=><option key={item.id} value={item.name}>{item.name}</option>)}</select></label><label>Quarter<select value={quarter} onChange={(e)=>setQuarter(e.target.value)}><option value="Todos">Quarter</option>{quarters.map((item)=><option key={item}>{item}</option>)}</select></label>{(product!=="Todos"||quarter!=="Todos")&&<button onClick={()=>{setProduct("Todos");setQuarter("Todos")}}><I.X/> Limpar</button>}<button className="audit-clear-button" disabled={history.length===0} onClick={()=>{if(window.confirm(`Apagar todas as ${history.length} alterações da auditoria? Esta ação não pode ser desfeita.`))setHistory([])}}><I.Trash2/> Apagar auditoria</button></div><Card>{filtered.length===0?<div className="changes-empty"><I.History/><b>Nenhuma alteração encontrada</b><span>{history.length?"Altere ou limpe os filtros para visualizar outros registros.":"As ações realizadas no Roadmap aparecerão automaticamente aqui."}</span></div>:filtered.map((item)=>{const storedVersion=versionFromLog(item);return <div className="change" key={item.id}><div className={`changeicon log-${item.tone}`}>{item.tone==="good"?<I.Plus/>:item.tone==="bad"?<I.Trash2/>:item.tone==="warn"?<I.ArrowRightLeft/>:<I.Users/>}</div><div><small>{item.date}</small>{storedVersion?<button className="audit-version-button" onClick={()=>setSelectedVersion(storedVersion)}>{item.title}<I.ExternalLink/></button>:<b>{item.title}</b>}<span>por {item.actor}{item.product?` · ${item.product}`:""}{item.quarter?` · ${item.quarter}`:""}</span>{(item.demandId||item.demandName)&&<span className="change-demand"><I.ListTodo/> Demanda: <b>{item.demandName||rows.find((d)=>d.id===item.demandId)?.name||item.demandId}</b>{item.demandId&&` (${item.demandId})`}</span>}</div><Badge tone={item.tone}>{item.detail}</Badge></div>})}</Card>
   {selectedVersion&&<div className="overlay confirm-overlay" onMouseDown={()=>setSelectedVersion(null)}><div className="version-detail-modal" onMouseDown={(e)=>e.stopPropagation()}><div className="modal-head"><div><span className="modal-icon"><I.History/></span><div><h2>Roadmap V{selectedVersion.version}</h2><p>{selectedVersion.quarter} · armazenada em {selectedVersion.createdAt}</p></div></div><button className="modal-close" onClick={()=>setSelectedVersion(null)}><I.X/></button></div><div className="version-demand-list">{selectedVersion.entries.length===0?<div className="picker-empty"><I.CalendarX/><b>Versão sem demandas</b></div>:selectedVersion.entries.map((entry)=>{const demand=selectedVersion.demands.find((item)=>item.id===entry.demandId);return <div key={entry.demandId}><span className="demand-dot"/><div><b>{demand?.name||entry.demandId}</b><small>{entry.demandId} · {demand?.product||"Produto não disponível"} · {demand?.status||"Status não disponível"}</small></div><Badge tone="blue">{entry.allocations.reduce((sum,item)=>sum+item.hours,0)}h</Badge></div>})}</div><div className="allocation-total"><span>Total da versão</span><b>{selectedVersion.entries.length} demanda(s) · {selectedVersion.entries.reduce((sum,entry)=>sum+entry.allocations.reduce((hours,item)=>hours+item.hours,0),0)}h</b></div><div className="picker-foot"><button className="primary" onClick={()=>setSelectedVersion(null)}>Fechar</button></div></div></div>}</>;
 }
 function Analytics() {
@@ -2782,6 +2867,7 @@ function Analytics() {
   const [productFilter, setProductFilter] = useState("Todos");
   const [quarterFilter, setQuarterFilter] = useState("Todos");
   const [billingFilter, setBillingFilter] = useState("Todos");
+  const [chartDimension,setChartDimension]=useState("Categoria");
   const isBilled = (demand: Demand) => (demand.billedAmount ?? 0) > 0;
   const completed = rows.filter(demand => ["Concluído", "Concluída"].includes(demand.status) || demand.progress === 100);
   const quarterFor = (demand: Demand) => {
@@ -2790,9 +2876,11 @@ function Analytics() {
     const match = demand.dueDate?.match(/^(\d{4})-(\d{2})-\d{2}$/);
     return match ? `Q${Math.ceil(Number(match[2]) / 3)} ${match[1]}` : "Sem quarter";
   };
-  const productOptions = Array.from(new Set([...products.map(product => product.name), ...completed.map(demand => demand.product)]));
+  const productOptions = products.filter(product => product.active).map(product => product.name);
   const quarterOptions = Array.from(new Set(completed.map(quarterFor))).sort((a, b) => a.localeCompare(b, "pt-BR"));
   const filtered = completed.filter(demand => (productFilter === "Todos" || demand.product === productFilter) && (quarterFilter === "Todos" || quarterFor(demand) === quarterFilter) && (billingFilter === "Todos" || isBilled(demand) === (billingFilter === "Faturadas")));
+  const chartLabel=(demand:Demand)=>chartDimension==="Categoria"?demand.type||"Não informado":chartDimension==="Origem"?demand.origin||"Não informado":demand.requester||"Não informado";
+  const completedByDimension=Object.entries(filtered.reduce<Record<string,number>>((counts,demand)=>{const label=chartLabel(demand);counts[label]=(counts[label]||0)+1;return counts;},{})).map(([label,quantidade])=>({label,quantidade})).sort((a,b)=>b.quantidade-a.quantidade||a.label.localeCompare(b.label,"pt-BR"));
   const allocatedByRole = (demand: Demand, roles: string[]) => {
     const allocations = roadmap.find(entry => entry.demandId === demand.id)?.allocations || [];
     const linkedIds = demand.resourceIds || [];
@@ -2813,6 +2901,10 @@ function Analytics() {
       <label>Faturamento<select value={billingFilter} onChange={event => setBillingFilter(event.target.value)}><option>Todos</option><option>Faturadas</option><option>Não faturadas</option></select></label>
       <span>{filtered.length} de {completed.length} demandas concluídas</span>
     </div>
+    <Card className="analytics-chart-card">
+      <div className="cardhead"><div><h3>Demandas concluídas por {chartDimension.toLowerCase()}</h3><p>Quantidade de entregas agrupada pelo campo selecionado</p></div><label>Agrupar por<select value={chartDimension} onChange={event=>setChartDimension(event.target.value)}><option>Categoria</option><option>Origem</option><option>Solicitante</option></select></label></div>
+      {completedByDimension.length?<ResponsiveContainer width="100%" height={320}><BarChart data={completedByDimension} margin={{top:10,right:18,left:0,bottom:55}}><CartesianGrid strokeDasharray="3 3" vertical={false}/><XAxis dataKey="label" interval={0} angle={-25} textAnchor="end" height={70} tick={{fontSize:10}}/><YAxis allowDecimals={false} tick={{fontSize:10}}/><Tooltip/><Bar dataKey="quantidade" name="Demandas concluídas" fill="#7052f5" radius={[5,5,0,0]}/></BarChart></ResponsiveContainer>:<div className="analytics-empty">Nenhuma demanda concluída encontrada para os filtros selecionados.</div>}
+    </Card>
     <Card><div className="tablewrap"><table className="analytics-table"><thead><tr><th>Demanda</th><th>Capacidade de Desenvolvimento</th><th>Capacidade de Testes</th><th>Prazo</th><th>Responsável</th><th>Faturada</th><th>Valor faturado</th></tr></thead><tbody>{filtered.map(demand => {
       const development = allocatedByRole(demand, ["DEV", "BACKEND", "FRONTEND", "FULL STACK"]);
       const tests = allocatedByRole(demand, ["QA", "QA ENGINEER"]);
@@ -2915,46 +3007,79 @@ function Settings() {
   );
 }
 
-function UsersAdmin({users, currentId, onChange}:{users:Account[];currentId:string;onChange:(users:Account[])=>void}) {
+function UsersAdmin({users,currentId,onChange}:{users:Account[];currentId:string;onChange:(users:Account[])=>void}) {
   const { products } = useProducts();
   const [name,setName]=useState(""); const [email,setEmail]=useState(""); const [password,setPassword]=useState("");
-  const [role,setRole]=useState<AccessRole>("Editor"); const [selectedProducts,setSelectedProducts]=useState<number[]>([]); const [error,setError]=useState("");
-  const allIds=products.map(product=>product.id);
+  const [role,setRole]=useState<AccessRole|"">(""); const [selectedProducts,setSelectedProducts]=useState<number[]>([]); const [error,setError]=useState(""); const [createOpen,setCreateOpen]=useState(false);
+  const [editingUser,setEditingUser]=useState<Account|null>(null); const [editName,setEditName]=useState(""); const [editEmail,setEditEmail]=useState(""); const [editPassword,setEditPassword]=useState(""); const [editRole,setEditRole]=useState<AccessRole>("Gestor"); const [editProducts,setEditProducts]=useState<number[]>([]); const [editError,setEditError]=useState("");
+  const [resetUser,setResetUser]=useState<Account|null>(null); const [resetPassword,setResetPassword]=useState(""); const [resetError,setResetError]=useState("");
+  const activeProducts=products.filter(product=>product.active); const allIds=activeProducts.map(product=>product.id);
+  const roleColor=(value:string)=>value==="Administrador"?"role-color-admin":value==="Gestor"?"role-color-manager":value==="Visualização"?"role-color-viewer":"";
   const toggle=(ids:number[],id:number)=>ids.includes(id)?ids.filter(value=>value!==id):[...ids,id];
+  const resetCreateForm=()=>{setName("");setEmail("");setPassword("");setRole("");setSelectedProducts([]);setError("")};
+  const openCreate=()=>{resetCreateForm();setCreateOpen(true)};
+  const closeCreate=()=>{setCreateOpen(false);resetCreateForm()};
+  const openEdit=(user:Account)=>{setEditingUser(user);setEditName(user.name);setEditEmail(user.email);setEditPassword("");setEditRole(user.role);setEditProducts(user.productIds??allIds);setEditError("")};
+  const closeEdit=()=>{setEditingUser(null);setEditPassword("");setEditError("")};
+  const openReset=(user:Account)=>{setResetUser(user);setResetPassword("");setResetError("")};
+  const closeReset=()=>{setResetUser(null);setResetPassword("");setResetError("")};
+  async function saveReset(event:React.FormEvent){event.preventDefault();if(!resetUser)return;if(resetPassword.length<8){setResetError("A senha temporária deve ter pelo menos 8 caracteres.");return}try{const updated=await updateAccountPassword(resetUser,resetPassword,true);onChange(users.map(user=>user.id===updated.id?updated:user));closeReset()}catch{setResetError("Não foi possível redefinir a senha.")}}
   async function add(e:React.FormEvent) {
     e.preventDefault(); setError("");
+    if(!role){setError("Selecione o perfil do usuário.");return}
     if(password.length<8){setError("A senha deve ter pelo menos 8 caracteres.");return}
     if(users.some(user=>user.email===email.trim().toLowerCase())){setError("Este e-mail já está cadastrado.");return}
-    if(role!=="Administrador" && selectedProducts.length===0){setError("Selecione ao menos um produto para o usuário.");return}
-    try {const account=await makeAccount(name,email,password,role);onChange([...users,{...account,productIds:role==="Administrador"?allIds:selectedProducts}]);setName("");setEmail("");setPassword("");setSelectedProducts([])}
+    if(role!=="Administrador" && selectedProducts.length===0){setError("Selecione ao menos um produto ativo para o usuário.");return}
+    try {const account=await makeAccount(name,email,password,role);onChange([...users,{...account,mustChangePassword:true,active:true,productIds:role==="Administrador"?allIds:selectedProducts}]);setName("");setEmail("");setPassword("");setSelectedProducts([]);closeCreate()}
     catch {setError("Não foi possível salvar o usuário.")}
   }
+  async function saveEdit(e:React.FormEvent){e.preventDefault();if(!editingUser)return;setEditError("");const normalizedEmail=editEmail.trim().toLowerCase();if(!editName.trim()){setEditError("Informe o nome do usuário.");return}if(!normalizedEmail){setEditError("Informe o e-mail do usuário.");return}if(users.some(user=>user.id!==editingUser.id&&user.email.toLowerCase()===normalizedEmail)){setEditError("Este e-mail já está cadastrado.");return}if(editPassword&&editPassword.length<8){setEditError("A nova senha deve ter pelo menos 8 caracteres.");return}if(editRole!=="Administrador"&&editProducts.length===0){setEditError("Selecione ao menos um produto ativo para o usuário.");return}try{const passwordAccount=editPassword?await makeAccount(editName,normalizedEmail,editPassword,editRole):null;onChange(users.map(user=>user.id===editingUser.id?{...user,name:editName.trim(),email:normalizedEmail,role:editRole,productIds:editRole==="Administrador"?allIds:editProducts,...(passwordAccount?{salt:passwordAccount.salt,passwordHash:passwordAccount.passwordHash,mustChangePassword:true}:{})}:user));closeEdit()}catch{setEditError("Não foi possível atualizar o usuário.")}}
   function changeRole(user:Account,next:AccessRole){if(user.email===ADMIN_EMAIL || user.id===currentId && next!=="Administrador")return;onChange(users.map(item=>item.id===user.id?{...item,role:next,productIds:next==="Administrador"?allIds:item.productIds??allIds}:item))}
   function changeProducts(user:Account,id:number){if(user.role==="Administrador")return;const next=toggle(user.productIds??allIds,id);onChange(users.map(item=>item.id===user.id?{...item,productIds:next}:item))}
-  function remove(user:Account){if(user.id===currentId || user.email===ADMIN_EMAIL)return;onChange(users.filter(item=>item.id!==user.id))}
-  return <><PageHead title="Administração de usuários" desc="Defina o perfil e os produtos que cada usuário pode acessar."/>
-    <Card><form className="account-form" onSubmit={add}>
-      <label>Nome<input required value={name} onChange={event=>setName(event.target.value)}/></label>
-      <label>E-mail<input required type="email" value={email} onChange={event=>setEmail(event.target.value)}/></label>
-      <label>Senha inicial<input required type="password" minLength={8} value={password} onChange={event=>setPassword(event.target.value)}/></label>
-      <label>Perfil<select value={role} onChange={event=>setRole(event.target.value as AccessRole)}><option>Administrador</option><option>Editor</option><option>Visualização</option></select></label>
-      {role!=="Administrador"&&<fieldset className="user-product-options"><legend>Produtos permitidos</legend>{products.map(product=><label key={product.id}><input type="checkbox" checked={selectedProducts.includes(product.id)} onChange={()=>setSelectedProducts(toggle(selectedProducts,product.id))}/>{product.name}</label>)}</fieldset>}
-      <button className="primary" type="submit"><I.UserPlus/> Criar usuário</button>
-    </form>{error&&<p className="auth-error" role="alert">{error}</p>}</Card>
-    <Card><div className="tablewrap"><table><thead><tr><th>Usuário</th><th>E-mail</th><th>Perfil</th><th>Produtos permitidos</th><th>Último acesso</th><th></th></tr></thead><tbody>{users.map(user=><tr key={user.id}>
-      <td><span className="person">{user.name[0]}</span><b>{user.name}</b></td><td>{user.email}</td>
-      <td><select className="quarter-inline" value={user.role} disabled={user.id===currentId||user.email===ADMIN_EMAIL} onChange={event=>changeRole(user,event.target.value as AccessRole)}><option>Administrador</option><option>Editor</option><option>Visualização</option></select></td>
-      <td>{user.role==="Administrador"?"Todos os produtos":<div className="user-product-options compact">{products.map(product=><label key={product.id}><input type="checkbox" checked={(user.productIds??allIds).includes(product.id)} onChange={()=>changeProducts(user,product.id)}/>{product.name}</label>)}</div>}</td>
+  function toggleActive(user:Account){if(user.id===currentId||user.email===ADMIN_EMAIL)return;onChange(users.map(item=>item.id===user.id?{...item,active:item.active===false}:item))}
+  function remove(user:Account){if(user.id===currentId||user.email===ADMIN_EMAIL)return;onChange(users.filter(item=>item.id!==user.id))}
+  return <>
+    <PageHead title="Administração de usuários" desc="Gerencie usuários, perfis e produtos permitidos." action={<button className="primary" onClick={openCreate}><I.UserPlus/> Novo usuário</button>}/>
+    <Card><div className="tablewrap"><table><thead><tr><th>Usuário</th><th>E-mail</th><th>Senha</th><th>Perfil</th><th>Produtos permitidos</th><th>Status</th><th>Último acesso</th><th>Ações</th></tr></thead><tbody>{users.map(user=><tr key={user.id}>
+      <td><span className="person">{user.name[0]}</span><b>{user.name}</b></td><td>{user.email}</td><td><span aria-label="Senha protegida">********</span></td>
+      <td><select className={`quarter-inline ${roleColor(user.role)}`} value={user.role} disabled={user.id===currentId||user.email===ADMIN_EMAIL} onChange={event=>changeRole(user,event.target.value as AccessRole)}><option>Administrador</option><option>Gestor</option><option>Visualização</option></select></td>
+      <td>{user.role==="Administrador"?"Todos os produtos":<div className="user-product-options compact">{activeProducts.map(product=><label key={product.id}><input type="checkbox" checked={(user.productIds??allIds).includes(product.id)} onChange={()=>changeProducts(user,product.id)}/>{product.name}</label>)}</div>}</td>
+      <td><Badge tone={user.active===false?"gray":"good"}>{user.active===false?"Bloqueado":"Ativo"}</Badge></td>
       <td>{user.lastAccessAt && Number.isFinite(Date.parse(user.lastAccessAt)) ? <time dateTime={user.lastAccessAt}>{new Date(user.lastAccessAt).toLocaleString("pt-BR")}</time> : "Sem registro"}</td>
-      <td>{user.id!==currentId&&user.email!==ADMIN_EMAIL&&<button className="ghost" onClick={()=>remove(user)} aria-label={`Excluir ${user.name}`}><I.Trash2/></button>}</td>
+      <td><div className="row-actions"><button className="edit" title="Editar usuário" aria-label={`Editar ${user.name}`} disabled={user.id===currentId||user.email===ADMIN_EMAIL} onClick={()=>openEdit(user)}><I.Pencil/></button><button title="Redefinir senha" aria-label={`Redefinir senha de ${user.name}`} disabled={user.id===currentId} onClick={()=>openReset(user)}><I.KeyRound/></button><button className={user.active===false?"user-activation is-blocked":"user-activation"} title={user.active===false?"Ativar usuário":"Bloquear usuário"} aria-label={user.active===false?`Ativar ${user.name}`:`Bloquear ${user.name}`} aria-pressed={user.active!==false} disabled={user.id===currentId||user.email===ADMIN_EMAIL} onClick={()=>toggleActive(user)}>{user.active===false?<I.CirclePlay/>:<I.CirclePause/>}</button><button className="delete" title="Excluir usuário" aria-label={`Excluir ${user.name}`} disabled={user.id===currentId||user.email===ADMIN_EMAIL} onClick={()=>remove(user)}><I.Trash2/></button></div></td>
     </tr>)}</tbody></table></div></Card>
+    {createOpen&&<div className="overlay confirm-overlay" onMouseDown={closeCreate}><form className="staff-modal users-create-modal" autoComplete="off" onMouseDown={event=>event.stopPropagation()} onSubmit={add}>
+      <div className="modal-head"><div><span className="modal-icon"><I.UserPlus/></span><div><h2>Novo usuário</h2><p>Cadastre o acesso e defina os produtos permitidos.</p></div></div><button type="button" className="modal-close" onClick={closeCreate}><I.X/></button></div>
+      <div className="users-create-form">
+        <label>Nome<input required value={name} onChange={event=>setName(event.target.value)}/></label>
+        <label>E-mail<input required type="email" autoComplete="off" value={email} onChange={event=>setEmail(event.target.value)}/></label>
+        <label>Senha inicial<input required type="password" autoComplete="new-password" minLength={8} value={password} onChange={event=>setPassword(event.target.value)}/></label>
+        <label>Perfil<select required className={roleColor(role)} value={role} onChange={event=>{setRole(event.target.value as AccessRole|"");setSelectedProducts([])}}><option value="">Selecione o perfil</option><option>Administrador</option><option>Gestor</option><option>Visualização</option></select></label>
+        {role!=="Administrador"&&<fieldset className="user-product-options"><legend>Produtos permitidos</legend>{activeProducts.map(product=><label key={product.id}><input type="checkbox" checked={selectedProducts.includes(product.id)} onChange={()=>setSelectedProducts(toggle(selectedProducts,product.id))}/>{product.name}</label>)}</fieldset>}
+        {error&&<div className="staff-error"><I.CircleAlert/>{error}</div>}
+      </div>
+      <div className="modal-actions"><button type="button" className="ghost" onClick={closeCreate}>Cancelar</button><button className="primary" type="submit"><I.UserPlus/> Criar usuário</button></div>
+    </form></div>}
+    {resetUser&&<div className="overlay confirm-overlay" onMouseDown={closeReset}><form className="staff-modal users-create-modal" autoComplete="off" onMouseDown={event=>event.stopPropagation()} onSubmit={saveReset}>
+      <div className="modal-head"><div><span className="modal-icon"><I.KeyRound/></span><div><h2>Redefinir senha</h2><p>Defina uma senha temporária para {resetUser.name}. A troca será obrigatória no próximo acesso.</p></div></div><button type="button" className="modal-close" onClick={closeReset}><I.X/></button></div>
+      <div className="users-create-form"><label className="wide">Senha temporária<input required type="password" autoComplete="new-password" minLength={8} value={resetPassword} onChange={event=>setResetPassword(event.target.value)}/></label>{resetError&&<div className="staff-error"><I.CircleAlert/>{resetError}</div>}</div>
+      <div className="modal-actions"><button type="button" className="ghost" onClick={closeReset}>Cancelar</button><button className="primary" type="submit"><I.KeyRound/> Redefinir senha</button></div>
+    </form></div>}
+    {editingUser&&<div className="overlay confirm-overlay" onMouseDown={closeEdit}><form className="staff-modal users-create-modal" onMouseDown={event=>event.stopPropagation()} onSubmit={saveEdit}>
+      <div className="modal-head"><div><span className="modal-icon"><I.Pencil/></span><div><h2>Editar usuário</h2><p>Atualize os dados, o perfil, os produtos permitidos ou a senha.</p></div></div><button type="button" className="modal-close" onClick={closeEdit}><I.X/></button></div>
+      <div className="users-create-form"><label>Nome<input required value={editName} onChange={event=>setEditName(event.target.value)}/></label><label>E-mail<input required type="email" value={editEmail} onChange={event=>setEditEmail(event.target.value)}/></label><label>Nova senha (opcional)<input type="password" minLength={8} value={editPassword} onChange={event=>setEditPassword(event.target.value)} placeholder="Deixe em branco para manter"/></label><label>Perfil<select className={roleColor(editRole)} value={editRole} onChange={event=>setEditRole(event.target.value as AccessRole)}><option>Administrador</option><option>Gestor</option><option>Visualização</option></select></label>{editRole!=="Administrador"&&<fieldset className="user-product-options"><legend>Produtos permitidos</legend>{activeProducts.map(product=><label key={product.id}><input type="checkbox" checked={editProducts.includes(product.id)} onChange={()=>setEditProducts(toggle(editProducts,product.id))}/>{product.name}</label>)}</fieldset>}{editError&&<div className="staff-error"><I.CircleAlert/>{editError}</div>}</div>
+      <div className="modal-actions"><button type="button" className="ghost" onClick={closeEdit}>Cancelar</button><button className="primary" type="submit"><I.Save/> Salvar alterações</button></div>
+    </form></div>}
   </>;
 }
-
 function Login({hasAccounts,onLogin}:{hasAccounts:boolean;onLogin:(account:Account,remember:boolean,accounts?:Account[])=>void}) {
-  const [name,setName]=useState("");const [email,setEmail]=useState("");const [password,setPassword]=useState("");const [remember,setRemember]=useState(false);const [error,setError]=useState("");const [busy,setBusy]=useState(false);
-  async function submit(e:React.FormEvent){e.preventDefault();setBusy(true);setError("");try {if(!hasAccounts){if(password.length<8){setError("Use uma senha com pelo menos 8 caracteres.");return}const account=await makeAccount(name,email,password,"Administrador");onLogin(account,remember,[account]);return}const account=loadAccounts().find(u=>u.email===email.trim().toLowerCase());if(!account || await hashPassword(password,account.salt)!==account.passwordHash){setError("E-mail ou senha inválidos.");return}onLogin(account,remember)}catch{setError("Não foi possível autenticar. Verifique o armazenamento do navegador.")}finally{setBusy(false)}}
-  return <div className="login-screen"><form className="login-card" onSubmit={submit}><div className="login-mark"><I.Waypoints/></div><h1>{hasAccounts?"Entrar no nddPlan":"Criar administrador"}</h1><p>{hasAccounts?"Acesse com seu e-mail e senha.":"Configure o primeiro acesso deste navegador."}</p>{!hasAccounts&&<label>Nome<input required autoComplete="name" value={name} onChange={e=>setName(e.target.value)}/></label>}<label>E-mail<input required type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)}/></label><label>Senha<input required type="password" minLength={hasAccounts?1:8} autoComplete={hasAccounts?"current-password":"new-password"} value={password} onChange={e=>setPassword(e.target.value)}/></label><label className="remember-login"><input type="checkbox" checked={remember} onChange={event=>setRemember(event.target.checked)}/><span>Manter conectado neste navegador</span></label>{error&&<p className="auth-error" role="alert">{error}</p>}<button className="primary" disabled={busy} type="submit">{busy?"Aguarde...":hasAccounts?"Entrar":"Criar conta e entrar"}</button><small>Os usuários e dados deste protótipo ficam armazenados neste navegador.</small></form></div>
+  const [name,setName]=useState("");const [email,setEmail]=useState("");const [password,setPassword]=useState("");const [newPassword,setNewPassword]=useState("");const [confirmPassword,setConfirmPassword]=useState("");const [pendingAccount,setPendingAccount]=useState<Account|null>(null);const [remember,setRemember]=useState(false);const [error,setError]=useState("");const [busy,setBusy]=useState(false);
+  async function submit(e:React.FormEvent){e.preventDefault();setBusy(true);setError("");try {
+    if(pendingAccount){if(newPassword.length<8){setError("A nova senha deve ter pelo menos 8 caracteres.");return}if(newPassword!==confirmPassword){setError("As senhas não coincidem.");return}const updated=await updateAccountPassword(pendingAccount,newPassword,false);const next=loadAccounts().map(user=>user.id===updated.id?updated:user);onLogin(updated,remember,next);return}
+    if(!hasAccounts){if(password.length<8){setError("Use uma senha com pelo menos 8 caracteres.");return}const account=await makeAccount(name,email,password,"Administrador");onLogin(account,remember,[account]);return}
+    const account=loadAccounts().find(user=>user.email===email.trim().toLowerCase());if(!account || await hashPassword(password,account.salt)!==account.passwordHash){setError("E-mail ou senha inválidos.");return}if(account.active===false){setError("Esta conta está bloqueada. Fale com um administrador.");return}if(account.mustChangePassword){setPendingAccount(account);setPassword("");return}onLogin(account,remember)
+  }catch{setError("Não foi possível autenticar. Verifique o armazenamento do navegador.")}finally{setBusy(false)}}
+  return <div className="login-screen"><form className="login-card" autoComplete="off" onSubmit={submit}><div className="login-mark"><I.Waypoints/></div><h1>{pendingAccount?"Troque sua senha":hasAccounts?"Entrar no nddPlan Work":"Criar administrador"}</h1><p>{pendingAccount?"Por segurança, escolha uma nova senha para continuar.":hasAccounts?"Acesse com seu e-mail e senha.":"Configure o primeiro acesso deste navegador."}</p>{pendingAccount?<><label>Nova senha<input required type="password" autoComplete="new-password" minLength={8} value={newPassword} onChange={event=>setNewPassword(event.target.value)}/></label><label>Confirme a nova senha<input required type="password" autoComplete="new-password" minLength={8} value={confirmPassword} onChange={event=>setConfirmPassword(event.target.value)}/></label></>:<>{!hasAccounts&&<label>Nome<input required autoComplete="name" value={name} onChange={e=>setName(e.target.value)}/></label>}<label>E-mail<input required type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)}/></label><label>Senha<input required type="password" minLength={hasAccounts?1:8} autoComplete={hasAccounts?"current-password":"new-password"} value={password} onChange={e=>setPassword(e.target.value)}/></label><label className="remember-login"><input type="checkbox" checked={remember} onChange={event=>setRemember(event.target.checked)}/><span>Manter conectado neste navegador</span></label></>}{error&&<p className="auth-error" role="alert">{error}</p>}<button className="primary" disabled={busy} type="submit">{busy?"Aguarde...":pendingAccount?"Salvar nova senha":hasAccounts?"Entrar":"Criar conta e entrar"}</button><small>Os usuários e dados deste protótipo ficam armazenados neste navegador.</small></form></div>
 }
 
 function App() {
@@ -2963,6 +3088,7 @@ function App() {
   const [activeId,setActiveId]=useState<string|null>(sessionId);
   const activeUser=accounts.find(u=>u.id===activeId);
   const [page, setPage] = useState<Page>("Visão geral");
+  const [subMenuOpen,setSubMenuOpen]=useState(true);
   const [dark, setDark] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [cmd, setCmd] = useState(false);
@@ -2970,7 +3096,9 @@ function App() {
   function updateAccounts(next:Account[]){saveAccounts(next);setAccounts(next)}
   function login(account:Account,remember:boolean,next?:Account[]){const lastAccessAt=new Date().toISOString();updateAccounts((next??loadAccounts()).map(user=>user.id===account.id?{...user,lastAccessAt}:user));setSession(account.id,remember);setActiveId(account.id)}
   function logout(){setSession(null);setActiveId(null);setCmd(false)}
-  const allowedNav=nav.filter(([name])=>role==="Administrador"?true:role==="Editor"?["Visão geral","Demandas","Roadmap","Comparação","Produtos","Capacidade","Analytics"].includes(name):["Demandas","Roadmap","Comparação","Capacidade","Analytics"].includes(name));
+  const allowedNav=nav.filter(([name])=>role==="Administrador"?true:role==="Gestor"?["Visão geral","Demandas","Roadmap","Iniciativas","Baseline","Produtos","Capacidade","Analytics"].includes(name):["Demandas","Roadmap","Iniciativas","Baseline","Capacidade","Analytics"].includes(name));
+  const mainNav=allowedNav.filter(([name])=>mainNavPages.includes(name));
+  const secondaryNav=allowedNav.filter(([name])=>!mainNavPages.includes(name));
   useEffect(()=>{if(!allowedNav.some(([name])=>name===page))setPage(role==="Visualização"?"Demandas":"Visão geral")},[role]);
   useEffect(() => {
     const f = (e: KeyboardEvent) => {
@@ -2982,42 +3110,38 @@ function App() {
     addEventListener("keydown", f);
     return () => removeEventListener("keydown", f);
   }, []);
-  if(!activeUser)return <Login hasAccounts={accounts.length>0} onLogin={login}/>;
+  if(!activeUser||activeUser.active===false)return <Login hasAccounts={accounts.length>0} onLogin={login}/>;
   return (
     <ProductAccessContext.Provider value={role === "Administrador" ? null : new Set(activeUser.productIds ?? productCatalog?.products.map(product => product.id) ?? [])}>
-    <div className={`${dark ? "app dark" : "app"} ${role === "Visualização" ? "role-viewer" : role === "Editor" ? "role-editor" : "role-admin"}`}>
+    <div className={`${dark ? "app dark" : "app"} ${role === "Visualização" ? "role-viewer" : role === "Gestor" ? "role-manager" : "role-admin"}`}>
       <aside className={collapsed ? "collapsed" : ""}>
         <div className="brand">
-          <span>
-            <I.Waypoints />
+          <span role="button" tabIndex={0} aria-label="Expandir menu" title="Expandir menu" onClick={() => setCollapsed(false)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setCollapsed(false); } }}>
+            <I.ArrowUpRight />
           </span>
           <b>
-            ndd<span>Plan</span>
+            nddPlan<span> Work</span>
           </b>
           <button onClick={() => setCollapsed(!collapsed)}>
             <I.PanelLeftClose />
           </button>
         </div>
         <nav>
-          {allowedNav.map(([n, Icon]) => (
-            <button
-              title={n}
-              className={page === n ? "active" : ""}
-              onClick={() => setPage(n)}
-            >
-              <Icon />
-              <span>{n}</span>
-            </button>
-          ))}
+          {mainNav.map(([n,Icon])=><button key={n} title={n} className={page===n?"active":""} onClick={()=>setPage(n)}><Icon/><span>{n}</span></button>)}
+          {secondaryNav.length>0&&<div className="nav-submenu">
+            <button type="button" className={`nav-submenu-toggle ${secondaryNav.some(([n])=>page===n)?"active":""}`} title="Mais menus" aria-expanded={subMenuOpen} onClick={()=>setSubMenuOpen(open=>!open)}><I.MoreHorizontal/><span>Mais menus</span><I.ChevronDown className={subMenuOpen?"":"collapsed-chevron"}/></button>
+            {subMenuOpen&&<div className="nav-submenu-items">{secondaryNav.map(([n,Icon])=><button key={n} title={n} className={page===n?"active":""} onClick={()=>{setPage(n);setSubMenuOpen(true)}}><Icon/><span>{n}</span></button>)}</div>}
+          </div>}
         </nav>
         <div className="sidefoot">
           <div className="workspace">
-            <span>AX</span>
+            <span>{activeUser.name.split(" ").map(part=>part[0]).slice(0,2).join("").toUpperCase()}</span>
             <div>
-              <b>Atlas Digital</b>
-              <small>Workspace enterprise</small>
+              <b>{activeUser.name}</b>
+              <small>{activeUser.role}</small>
+              <small className="workspace-email" title={activeUser.email}>{activeUser.email}</small>
             </div>
-            <I.ChevronsUpDown />
+            <button className="logout-button" onClick={logout} title="Sair" aria-label="Sair"><I.LogOut/></button>
           </div>
         </div>
       </aside>
@@ -3025,11 +3149,6 @@ function App() {
         <header>
           <button className="mobile" onClick={() => setCollapsed(!collapsed)}>
             <I.Menu />
-          </button>
-          <button className="topsearch" onClick={() => setCmd(true)}>
-            <I.Search />
-            <span>Buscar demandas, projetos, pessoas...</span>
-            <kbd>Ctrl K</kbd>
           </button>
           <div className="topactions">
             <button onClick={() => setDark(!dark)}>
@@ -3039,14 +3158,6 @@ function App() {
               <I.Bell />
               <i />
             </button>
-            <div className="user">
-              <span>{activeUser.name.split(" ").map(part=>part[0]).slice(0,2).join("").toUpperCase()}</span>
-              <div>
-                <b>{activeUser.name}</b>
-                <small>{role}</small>
-              </div>
-              <button className="logout-button" onClick={logout} title="Sair" aria-label="Sair"><I.LogOut/></button>
-            </div>
           </div>
         </header>
         <div className="content">
@@ -3054,7 +3165,9 @@ function App() {
             <Dashboard go={setPage} />
           ) : page === "Roadmap" ? (
             <Roadmap />
-          ) : page === "Comparação" ? (
+          ) : page === "Iniciativas" ? (
+            <Initiatives readOnly={role==="Visualização"} />
+          ) : page === "Baseline" ? (
             <RoadmapComparison />
           ) : page === "Demandas" ? (
             <Demands />
@@ -3062,7 +3175,7 @@ function App() {
             <Products />
           ) : page === "Capacidade" ? (
             <Capacity />
-          ) : page === "Planejamento" ? (
+          ) : page === "Visibilidade Entregas" ? (
             <Planning />
           ) : page === "Auditoria" ? (
             <Changes />
@@ -3117,3 +3230,6 @@ createRoot(document.getElementById("root")!).render(
     </TeamProvider>
   </ProductProvider>,
 );
+
+
+

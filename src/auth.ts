@@ -1,5 +1,5 @@
-export type AccessRole = "Administrador" | "Editor" | "Visualização";
-export type Account = { id: string; name: string; email: string; role: AccessRole; productIds?: number[]; lastAccessAt?: string; salt: string; passwordHash: string };
+﻿export type AccessRole = "Administrador" | "Gestor" | "Visualização";
+export type Account = { id: string; name: string; email: string; role: AccessRole; productIds?: number[]; active?: boolean; lastAccessAt?: string; mustChangePassword?: boolean; salt: string; passwordHash: string };
 
 const USERS_KEY = "roadmap.accounts.v1";
 const SESSION_KEY = "roadmap.session.v1";
@@ -18,7 +18,16 @@ const initialAdmin: Account = {
 export function loadAccounts(): Account[] {
   try {
     const value = JSON.parse(localStorage.getItem(USERS_KEY) || "[]");
-    const accounts: Account[] = Array.isArray(value) ? value : [];
+    let accounts: Account[] = Array.isArray(value) ? value : [];
+    if (!localStorage.getItem("roadmap.account-labels-v2")) {
+      accounts = accounts.map(account => ({
+        ...account,
+        ...(account.email?.toLowerCase() === ADMIN_EMAIL ? { name: "Vagner Moraes" } : {}),
+        ...(String(account.role) === "Editor" ? { role: "Gestor" as const } : {}),
+      }));
+      localStorage.setItem(USERS_KEY, JSON.stringify(accounts));
+      localStorage.setItem("roadmap.account-labels-v2", "1");
+    }
     if (localStorage.getItem(ADMIN_SEED_KEY)) return accounts;
     const existing = accounts.find(account => account.email?.toLowerCase() === ADMIN_EMAIL);
     const next = existing
@@ -60,3 +69,10 @@ export async function makeAccount(name: string, email: string, password: string,
   const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
   return { id: crypto.randomUUID(), name: name.trim(), email: email.trim().toLowerCase(), role, salt, passwordHash: await hashPassword(password, salt) };
 }
+
+export async function updateAccountPassword(account: Account, password: string, mustChangePassword = false): Promise<Account> {
+  const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
+  return { ...account, salt, passwordHash: await hashPassword(password, salt), mustChangePassword };
+}
+
+
