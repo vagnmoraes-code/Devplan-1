@@ -30,6 +30,7 @@ import "./changes.css";
 import "./demands.css";
 import "./initiatives.css";
 import capacitySeed from "./capacity-seed.json";
+import { savePortalState } from "./database";
 import { ADMIN_EMAIL, Account, AccessRole, hashPassword, loadAccounts, makeAccount, saveAccounts, sessionId, setSession, updateAccountPassword } from "./auth";
 
 function usePersistentState<T>(key: string, initialValue: T | (() => T)) {
@@ -48,6 +49,7 @@ function usePersistentState<T>(key: string, initialValue: T | (() => T)) {
   useEffect(() => {
     try {
       localStorage.setItem(key, JSON.stringify(value));
+      void savePortalState(key, value);
     } catch {
       // A aplicação continua funcional mesmo sem acesso ao armazenamento local.
     }
