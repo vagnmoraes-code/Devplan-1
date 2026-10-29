@@ -21,7 +21,7 @@ npm run build
 
 O projeto inclui as funções `api/state.mjs` e `api/accounts.mjs`, usadas pelo portal publicado para ler e salvar o estado e as contas no Supabase. No projeto da Vercel, configure as variáveis `SUPABASE_URL` e `SUPABASE_SECRET_KEY` em **Settings → Environment Variables** (Production e também Preview, se usar previews) e faça um novo deploy. Use os valores do projeto Supabase; não coloque a chave secreta em variáveis `VITE_*` nem no código do navegador.
 
-No Supabase, aplique `scripts/supabase-schema.sql` pelo SQL Editor antes de publicar a nova versão. O script cria/atualiza `portal_accounts` e `portal_records`, migra cada item das coleções antigas de `portal_state` para uma linha própria em `portal_records` e limpa as linhas antigas somente depois da cópia. A API passa a ler e gravar cada item nessa tabela, preservando a ordem original de cada coleção.
+No Supabase, aplique `scripts/supabase-schema.sql` pelo SQL Editor antes de publicar a nova versão. O script cria/atualiza `portal_accounts` e `portal_records`, migra os registros antigos e transfere as demandas para `public.demands`, uma demanda por linha, vinculando produto e recursos por seus relacionamentos. A API lê e grava demandas diretamente nessa tabela funcional; as outras coleções continuam em `portal_records`, uma linha por registro.
 
 ## Principais recursos
 

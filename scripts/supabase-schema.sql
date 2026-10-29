@@ -138,6 +138,37 @@ create table if not exists public.portal_records (
 alter table public.portal_records enable row level security;
 grant all on table public.portal_records to service_role;
 
+-- Demand rows use the existing functional table and reference products by id.
+create table if not exists public.demands (
+  id text primary key,
+  name text not null,
+  product_id integer references public.products(id) on delete set null,
+  owner text not null default '',
+  status text not null default '',
+  priority text not null default '',
+  effort numeric not null default 0,
+  actual_effort numeric,
+  billable boolean,
+  billed_amount numeric,
+  progress numeric not null default 0,
+  due text not null default '',
+  risk text not null default '',
+  type text,
+  origin text,
+  requester text,
+  version text,
+  artifact_number text,
+  notes text,
+  start_date text,
+  due_date text
+);
+
+alter table public.demands add column if not exists sort_order integer not null default 0;
+alter table public.demands enable row level security;
+grant all on table public.demands to service_role;
+alter table public.demand_staff enable row level security;
+grant all on table public.demand_staff to service_role;
+
 create or replace function public.portal_record_id(p_collection text, p_value jsonb)
 returns text
 language sql
@@ -164,7 +195,7 @@ language plpgsql
 as $$
 begin
   if p_collection not in (
-    'dev-plan:products', 'dev-plan:demands', 'dev-plan:roadmap',
+    'dev-plan:products', 'dev-plan:roadmap',
     'dev-plan:history', 'dev-plan:roadmap-versions', 'dev-plan:team',
     'dev-plan:initiatives'
   ) then
@@ -210,6 +241,142 @@ $$;
 revoke all on function public.replace_portal_records(text, jsonb) from public, anon, authenticated;
 grant execute on function public.replace_portal_records(text, jsonb) to service_role;
 
+create or replace function public.replace_portal_demands(p_records jsonb)
+returns void
+language plpgsql
+as $$
+begin
+  if jsonb_typeof(p_records) <> 'array' then
+    raise exception 'Demands must be a JSON array.';
+  end if;
+
+  if exists (
+    select 1 from jsonb_array_elements(p_records) as item(value)
+    where jsonb_typeof(item.value) <> 'object'
+      or nullif(item.value->>'id', '') is null
+      or nullif(item.value->>'name', '') is null
+  ) then
+    raise exception 'Each demand must have an id and name.';
+  end if;
+
+  if exists (
+    select 1
+    from jsonb_array_elements(p_records) as item(value)
+    where nullif(item.value->>'product', '') is not null
+      and not exists (
+        select 1 from public.products product
+        where lower(trim(product.name)) = lower(trim(item.value->>'product'))
+      )
+  ) then
+    raise exception 'A demand references a product that does not exist in public.products.';
+  end if;
+
+  delete from public.demand_staff link
+  where not exists (
+    select 1 from jsonb_array_elements(p_records) as item(value)
+    where item.value->>'id' = link.demand_id
+  );
+
+  delete from public.roadmap_allocations allocation
+  using public.roadmap_entries entry
+  where allocation.roadmap_entry_id = entry.id
+    and not exists (
+      select 1 from jsonb_array_elements(p_records) as item(value)
+      where item.value->>'id' = entry.demand_id
+    );
+
+  delete from public.roadmap_collaborators collaborator
+  using public.roadmap_entries entry
+  where collaborator.roadmap_entry_id = entry.id
+    and not exists (
+      select 1 from jsonb_array_elements(p_records) as item(value)
+      where item.value->>'id' = entry.demand_id
+    );
+
+  delete from public.roadmap_entries entry
+  where not exists (
+    select 1 from jsonb_array_elements(p_records) as item(value)
+    where item.value->>'id' = entry.demand_id
+  );
+
+  delete from public.demands demand
+  where not exists (
+    select 1 from jsonb_array_elements(p_records) as item(value)
+    where item.value->>'id' = demand.id
+  );
+
+  delete from public.demand_staff;
+
+  insert into public.demands (
+    id, name, product_id, owner, status, priority, effort, actual_effort,
+    billable, billed_amount, progress, due, risk, type, origin, requester,
+    version, artifact_number, notes, start_date, due_date, sort_order
+  )
+  select
+    item.value->>'id',
+    item.value->>'name',
+    product.id,
+    coalesce(item.value->>'owner', ''),
+    coalesce(item.value->>'status', ''),
+    coalesce(item.value->>'priority', ''),
+    coalesce(nullif(item.value->>'effort', '')::numeric, 0),
+    nullif(item.value->>'actualEffort', '')::numeric,
+    nullif(item.value->>'billable', '')::boolean,
+    nullif(item.value->>'billedAmount', '')::numeric,
+    coalesce(nullif(item.value->>'progress', '')::numeric, 0),
+    coalesce(item.value->>'due', ''),
+    coalesce(item.value->>'risk', ''),
+    item.value->>'type',
+    item.value->>'origin',
+    item.value->>'requester',
+    item.value->>'version',
+    item.value->>'artifactNumber',
+    item.value->>'notes',
+    item.value->>'startDate',
+    item.value->>'dueDate',
+    (item.ordinality - 1)::integer
+  from jsonb_array_elements(p_records) with ordinality as item(value, ordinality)
+  left join lateral (
+    select existing.id
+    from public.products existing
+    where lower(trim(existing.name)) = lower(trim(item.value->>'product'))
+    order by existing.id
+    limit 1
+  ) product on true
+  on conflict (id) do update set
+    name = excluded.name,
+    product_id = excluded.product_id,
+    owner = excluded.owner,
+    status = excluded.status,
+    priority = excluded.priority,
+    effort = excluded.effort,
+    actual_effort = excluded.actual_effort,
+    billable = excluded.billable,
+    billed_amount = excluded.billed_amount,
+    progress = excluded.progress,
+    due = excluded.due,
+    risk = excluded.risk,
+    type = excluded.type,
+    origin = excluded.origin,
+    requester = excluded.requester,
+    version = excluded.version,
+    artifact_number = excluded.artifact_number,
+    notes = excluded.notes,
+    start_date = excluded.start_date,
+    due_date = excluded.due_date,
+    sort_order = excluded.sort_order;
+
+  insert into public.demand_staff (demand_id, staff_id)
+  select item.value->>'id', resource.value::bigint
+  from jsonb_array_elements(p_records) as item(value)
+  cross join lateral jsonb_array_elements_text(coalesce(item.value->'resourceIds', '[]'::jsonb)) as resource(value)
+  on conflict (demand_id, staff_id) do nothing;
+end;
+$$;
+
+revoke all on function public.replace_portal_demands(jsonb) from public, anon, authenticated;
+grant execute on function public.replace_portal_demands(jsonb) to service_role;
+
 -- Move existing collections without changing their array order, then empty the legacy table.
 insert into public.portal_records (collection, record_id, position, value)
 select
@@ -234,6 +401,23 @@ delete from public.portal_state where key in (
   'dev-plan:history', 'dev-plan:roadmap-versions', 'dev-plan:team',
   'dev-plan:initiatives'
 );
+
+-- Move existing demand records to public.demands; keep the source rows if validation fails.
+do $$
+declare
+  existing_demands jsonb;
+begin
+  select coalesce(jsonb_agg(value order by position), '[]'::jsonb)
+  into existing_demands
+  from public.portal_records
+  where collection = 'dev-plan:demands';
+
+  if jsonb_array_length(existing_demands) > 0 then
+    perform public.replace_portal_demands(existing_demands);
+    delete from public.portal_records where collection = 'dev-plan:demands';
+  end if;
+end;
+$$;
 
 create or replace function public.set_portal_state_updated_at()
 returns trigger

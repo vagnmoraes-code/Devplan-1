@@ -14,6 +14,8 @@ const STATE_KEYS = new Set([
 ]);
 const TABLE = "portal_records";
 const REPLACE_RPC = "replace_portal_records";
+const DEMANDS_COLLECTION = "dev-plan:demands";
+const DEMANDS_REPLACE_RPC = "replace_portal_demands";
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
 
 function readEnvFile() {
@@ -66,16 +68,75 @@ async function loadCollections(url, key) {
   }
   const collections = new Map([...STATE_KEYS].map(collection => [collection, []]));
   for (const record of records) {
-    if (collections.has(record.collection)) collections.get(record.collection).push(record.value);
+    if (record.collection !== DEMANDS_COLLECTION && collections.has(record.collection)) {
+      collections.get(record.collection).push(record.value);
+    }
   }
+  collections.set(DEMANDS_COLLECTION, await loadDemands(url, key));
   return [...collections].map(([key, value]) => ({ key, value }));
 }
 
+async function loadDemands(url, key) {
+  const [demands, products, staffLinks] = await Promise.all([
+    fetchAllRows(url, key, "demands?select=*&order=sort_order.asc,id.asc"),
+    fetchAllRows(url, key, "products?select=id,name"),
+    fetchAllRows(url, key, "demand_staff?select=demand_id,staff_id"),
+  ]);
+  const productNames = new Map(products.map(product => [String(product.id), product.name]));
+  const resourcesByDemand = new Map();
+  for (const link of staffLinks) {
+    const ids = resourcesByDemand.get(link.demand_id) || [];
+    ids.push(Number(link.staff_id));
+    resourcesByDemand.set(link.demand_id, ids);
+  }
+  return demands.map(row => ({
+    id: row.id,
+    name: row.name,
+    product: productNames.get(String(row.product_id)) || "",
+    owner: row.owner || "",
+    status: row.status || "",
+    priority: row.priority || "",
+    effort: Number(row.effort ?? 0),
+    ...(row.actual_effort == null ? {} : { actualEffort: Number(row.actual_effort) }),
+    ...(row.billable == null ? {} : { billable: row.billable }),
+    ...(row.billed_amount == null ? {} : { billedAmount: Number(row.billed_amount) }),
+    progress: Number(row.progress ?? 0),
+    due: row.due || "",
+    risk: row.risk || "",
+    ...(row.type == null ? {} : { type: row.type }),
+    ...(row.origin == null ? {} : { origin: row.origin }),
+    ...(row.requester == null ? {} : { requester: row.requester }),
+    ...(row.version == null ? {} : { version: row.version }),
+    ...(row.artifact_number == null ? {} : { artifactNumber: row.artifact_number }),
+    ...(row.notes == null ? {} : { notes: row.notes }),
+    ...(row.start_date == null ? {} : { startDate: row.start_date }),
+    ...(row.due_date == null ? {} : { dueDate: row.due_date }),
+    resourceIds: resourcesByDemand.get(row.id) || [],
+  }));
+}
+
+async function fetchAllRows(url, key, query) {
+  const rows = [];
+  const pageSize = 1000;
+  for (let offset = 0; ; offset += pageSize) {
+    const response = await fetch(url + "/rest/v1/" + query, {
+      headers: { apikey: key, "Range-Unit": "items", Range: offset + "-" + (offset + pageSize - 1) },
+    });
+    if (!response.ok) throw new Error("Supabase returned HTTP " + response.status + " while loading demands.");
+    const page = await response.json();
+    rows.push(...page);
+    if (page.length < pageSize) return rows;
+  }
+}
+
 async function replaceCollection(url, key, collection, records) {
-  const response = await fetch(url + "/rest/v1/rpc/" + REPLACE_RPC, {
+  const isDemands = collection === DEMANDS_COLLECTION;
+  const response = await fetch(url + "/rest/v1/rpc/" + (isDemands ? DEMANDS_REPLACE_RPC : REPLACE_RPC), {
     method: "POST",
     headers: { apikey: key, "content-type": "application/json" },
-    body: JSON.stringify({ p_collection: collection, p_records: records }),
+    body: JSON.stringify(isDemands
+      ? { p_records: records }
+      : { p_collection: collection, p_records: records }),
   });
   if (!response.ok) throw new Error("Supabase returned HTTP " + response.status + " while saving records.");
 }
