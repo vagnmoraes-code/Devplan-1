@@ -229,7 +229,7 @@ export async function startApiServer() {
         sendJson(response, 400, { error: error.message });
         return;
       }
-      console.error("Falha ao acessar o Supabase:", error.name || "Erro de rede");
+      console.error("Falha ao acessar o Supabase:", error.message || error.name || "Erro de rede");
       sendJson(response, 502, { error: "Falha de comunicação com o Supabase." });
     }
   });

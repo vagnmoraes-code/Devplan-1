@@ -139,7 +139,7 @@ export default async function handler(request, response) {
     for (const record of records) await replaceCollection(url, key, record.key, record.value);
     return sendJson(response, 200, { ok: true });
   } catch (error) {
-    console.error("Portal records request failed:", error.name || "NetworkError");
+    console.error("Portal records request failed:", error.message || error.name || "NetworkError");
     return sendJson(response, 502, { error: "Could not access Supabase records." });
   }
 }
