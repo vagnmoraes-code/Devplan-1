@@ -123,30 +123,39 @@ function useAllowedProductNames() {
   return allowedIds === null ? null : new Set((catalog?.products || []).filter(product => allowedIds.has(product.id)).map(product => product.name));
 }
 const initialProducts: Product[] = [
-  { id: 1, name: "nddMove", code: "MOVE", description: "", team: "Squad nddMove", coordinator: "Marina Costa", active: true },
   { id: 2, name: "nddCargo", code: "CARGO", description: "", team: "Squad nddCargo", coordinator: "Rafael Lima", active: true },
-  { id: 3, name: "nddElog", code: "ELOG", description: "", team: "Squad nddElog", coordinator: "Camila Souza", active: true },
-  { id: 4, name: "nddFrete", code: "FRETE", description: "", team: "Squad nddFrete", coordinator: "Bruno Alves", active: true },
   { id: 5, name: "CIOT FÁCIL", code: "CIOT", description: "", team: "Squad CIOT FÁCIL", coordinator: "Bianca Melo", active: true },
 ];
 const legacyProductNames: Record<string,string> = { Commerce: "nddMove", Payments: "nddCargo", Customer: "nddElog", Platform: "nddFrete", Analytics: "CIOT FÁCIL" };
 function migrateProducts() {
   try {
-    if (localStorage.getItem("dev-plan:products-v2")) return;
-    // Atualiza referências do conjunto demonstrativo antigo sem apagar demandas ou capacidade.
-    for (const key of ["dev-plan:demands", "dev-plan:team", "dev-plan:history", "dev-plan:roadmap-versions"]) {
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      const value = JSON.parse(raw);
-      const replace = (item:unknown):unknown => {
-        if (Array.isArray(item)) return item.map(replace);
-        if (item && typeof item === "object") return Object.fromEntries(Object.entries(item).map(([field,content]) => [field, field === "product" && typeof content === "string" ? legacyProductNames[content] ?? content : replace(content)]));
-        return item;
-      };
-      localStorage.setItem(key, JSON.stringify(replace(value)));
+    if (!localStorage.getItem("dev-plan:products-v2")) {
+      // Atualiza referências do conjunto demonstrativo antigo sem apagar demandas ou capacidade.
+      for (const key of ["dev-plan:demands", "dev-plan:team", "dev-plan:history", "dev-plan:roadmap-versions"]) {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const value = JSON.parse(raw);
+        const replace = (item:unknown):unknown => {
+          if (Array.isArray(item)) return item.map(replace);
+          if (item && typeof item === "object") return Object.fromEntries(Object.entries(item).map(([field,content]) => [field, field === "product" && typeof content === "string" ? legacyProductNames[content] ?? content : replace(content)]));
+          return item;
+        };
+        localStorage.setItem(key, JSON.stringify(replace(value)));
+      }
+      localStorage.setItem("dev-plan:products-v2", "1");
     }
-    localStorage.setItem("dev-plan:products", JSON.stringify(initialProducts));
-    localStorage.setItem("dev-plan:products-v2", "1");
+
+    const removalMigrationKey = "dev-plan:product-removals-v1";
+    if (!localStorage.getItem(removalMigrationKey)) {
+      let products: Product[] = initialProducts;
+      try {
+        const stored = JSON.parse(localStorage.getItem("dev-plan:products") || "null");
+        if (Array.isArray(stored)) products = stored;
+      } catch { /* Usa a lista inicial quando o catálogo local estiver inválido. */ }
+      const removedNames = new Set(["nddmove", "nddfrete", "nddelog"]);
+      localStorage.setItem("dev-plan:products", JSON.stringify(products.filter(product => !removedNames.has(product.name.toLowerCase()))));
+      localStorage.setItem(removalMigrationKey, "1");
+    }
   } catch { /* Mantém os dados locais quando o armazenamento não estiver disponível. */ }
 }
 migrateProducts();
@@ -3081,7 +3090,7 @@ function Login({hasAccounts,onLogin}:{hasAccounts:boolean;onLogin:(account:Accou
     if(!hasAccounts){if(password.length<8){setError("Use uma senha com pelo menos 8 caracteres.");return}const account=await makeAccount(name,email,password,"Administrador");onLogin(account,remember,[account]);return}
     const account=loadAccounts().find(user=>user.email===email.trim().toLowerCase());if(!account || await hashPassword(password,account.salt)!==account.passwordHash){setError("E-mail ou senha inválidos.");return}if(account.active===false){setError("Esta conta está bloqueada. Fale com um administrador.");return}if(account.mustChangePassword){setPendingAccount(account);setPassword("");return}onLogin(account,remember)
   }catch{setError("Não foi possível autenticar. Verifique o armazenamento do navegador.")}finally{setBusy(false)}}
-  return <div className="login-screen"><form className="login-card" autoComplete="off" onSubmit={submit}><div className="login-mark"><I.Waypoints/></div><h1>{pendingAccount?"Troque sua senha":hasAccounts?"Entrar no nddPlan Work":"Criar administrador"}</h1><p>{pendingAccount?"Por segurança, escolha uma nova senha para continuar.":hasAccounts?"Acesse com seu e-mail e senha.":"Configure o primeiro acesso deste navegador."}</p>{pendingAccount?<><label>Nova senha<input required type="password" autoComplete="new-password" minLength={8} value={newPassword} onChange={event=>setNewPassword(event.target.value)}/></label><label>Confirme a nova senha<input required type="password" autoComplete="new-password" minLength={8} value={confirmPassword} onChange={event=>setConfirmPassword(event.target.value)}/></label></>:<>{!hasAccounts&&<label>Nome<input required autoComplete="name" value={name} onChange={e=>setName(e.target.value)}/></label>}<label>E-mail<input required type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)}/></label><label>Senha<input required type="password" minLength={hasAccounts?1:8} autoComplete={hasAccounts?"current-password":"new-password"} value={password} onChange={e=>setPassword(e.target.value)}/></label><label className="remember-login"><input type="checkbox" checked={remember} onChange={event=>setRemember(event.target.checked)}/><span>Manter conectado neste navegador</span></label></>}{error&&<p className="auth-error" role="alert">{error}</p>}<button className="primary" disabled={busy} type="submit">{busy?"Aguarde...":pendingAccount?"Salvar nova senha":hasAccounts?"Entrar":"Criar conta e entrar"}</button><small>Os usuários e dados deste protótipo ficam armazenados neste navegador.</small></form></div>
+  return <div className="login-screen"><form className="login-card" autoComplete="off" onSubmit={submit}><div className="login-mark"><I.Waypoints/></div><h1>{pendingAccount?"Troque sua senha":hasAccounts?"Entrar no nddPlan Work":"Criar administrador"}</h1><p>{pendingAccount?"Por segurança, escolha uma nova senha para continuar.":hasAccounts?"Acesse com seu e-mail e senha.":"Configure o primeiro acesso deste navegador."}</p>{pendingAccount?<><label>Nova senha<input required type="password" autoComplete="new-password" minLength={8} value={newPassword} onChange={event=>setNewPassword(event.target.value)}/></label><label>Confirme a nova senha<input required type="password" autoComplete="new-password" minLength={8} value={confirmPassword} onChange={event=>setConfirmPassword(event.target.value)}/></label><label className="remember-login"><input type="checkbox" checked={remember} onChange={event=>setRemember(event.target.checked)}/><span>Manter conectado neste navegador</span></label></>:<>{!hasAccounts&&<label>Nome<input required autoComplete="name" value={name} onChange={e=>setName(e.target.value)}/></label>}<label>E-mail<input required type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)}/></label><label>Senha<input required type="password" minLength={hasAccounts?1:8} autoComplete={hasAccounts?"current-password":"new-password"} value={password} onChange={e=>setPassword(e.target.value)}/></label><label className="remember-login"><input type="checkbox" checked={remember} onChange={event=>setRemember(event.target.checked)}/><span>Manter conectado neste navegador</span></label></>}{error&&<p className="auth-error" role="alert">{error}</p>}<button className="primary" disabled={busy} type="submit">{busy?"Aguarde...":pendingAccount?"Salvar nova senha":hasAccounts?"Entrar":"Criar conta e entrar"}</button><small>Os usuários e dados deste protótipo ficam armazenados neste navegador.</small></form></div>
 }
 
 function App() {
