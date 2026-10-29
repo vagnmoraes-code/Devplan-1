@@ -115,6 +115,126 @@ on conflict (id) do update set
 
 delete from public.portal_state where key = 'roadmap.accounts.v1';
 
+-- Store each business record on its own row instead of keeping a whole collection in one JSON value.
+create table if not exists public.portal_records (
+  collection text not null check (
+    collection in (
+      'dev-plan:products',
+      'dev-plan:demands',
+      'dev-plan:roadmap',
+      'dev-plan:history',
+      'dev-plan:roadmap-versions',
+      'dev-plan:team',
+      'dev-plan:initiatives'
+    )
+  ),
+  record_id text not null,
+  position integer not null default 0,
+  value jsonb not null,
+  updated_at timestamptz not null default now(),
+  primary key (collection, record_id)
+);
+
+alter table public.portal_records enable row level security;
+grant all on table public.portal_records to service_role;
+
+create or replace function public.portal_record_id(p_collection text, p_value jsonb)
+returns text
+language sql
+immutable
+as $$
+  select coalesce(
+    nullif(p_value->>'id', ''),
+    case when p_collection = 'dev-plan:roadmap'
+      and p_value->>'demandId' is not null
+      and p_value->>'quarter' is not null
+      then (p_value->>'demandId') || ':' || (p_value->>'quarter')
+      else null
+    end,
+    md5(p_value::text)
+  );
+$$;
+
+revoke all on function public.portal_record_id(text, jsonb) from public, anon, authenticated;
+grant execute on function public.portal_record_id(text, jsonb) to service_role;
+
+create or replace function public.replace_portal_records(p_collection text, p_records jsonb)
+returns void
+language plpgsql
+as $$
+begin
+  if p_collection not in (
+    'dev-plan:products', 'dev-plan:demands', 'dev-plan:roadmap',
+    'dev-plan:history', 'dev-plan:roadmap-versions', 'dev-plan:team',
+    'dev-plan:initiatives'
+  ) then
+    raise exception 'Invalid portal collection.';
+  end if;
+
+  if jsonb_typeof(p_records) <> 'array' then
+    raise exception 'Portal records must be a JSON array.';
+  end if;
+
+  if exists (
+    select 1
+    from jsonb_array_elements(p_records) as item(value)
+    where jsonb_typeof(item.value) <> 'object'
+      or public.portal_record_id(p_collection, item.value) is null
+  ) then
+    raise exception 'Each portal record must be a JSON object with an identifier.';
+  end if;
+
+  delete from public.portal_records existing
+  where existing.collection = p_collection
+    and not exists (
+      select 1
+      from jsonb_array_elements(p_records) as item(value)
+      where public.portal_record_id(p_collection, item.value) = existing.record_id
+    );
+
+  insert into public.portal_records (collection, record_id, position, value, updated_at)
+  select
+    p_collection,
+    public.portal_record_id(p_collection, item.value),
+    (item.ordinality - 1)::integer,
+    item.value,
+    now()
+  from jsonb_array_elements(p_records) with ordinality as item(value, ordinality)
+  on conflict (collection, record_id) do update set
+    position = excluded.position,
+    value = excluded.value,
+    updated_at = excluded.updated_at;
+end;
+$$;
+
+revoke all on function public.replace_portal_records(text, jsonb) from public, anon, authenticated;
+grant execute on function public.replace_portal_records(text, jsonb) to service_role;
+
+-- Move existing collections without changing their array order, then empty the legacy table.
+insert into public.portal_records (collection, record_id, position, value)
+select
+  state.key,
+  public.portal_record_id(state.key, item.value),
+  (item.ordinality - 1)::integer,
+  item.value
+from public.portal_state state
+cross join lateral jsonb_array_elements(
+  case when jsonb_typeof(state.value) = 'array' then state.value else '[]'::jsonb end
+) with ordinality as item(value, ordinality)
+where state.key in (
+  'dev-plan:products', 'dev-plan:demands', 'dev-plan:roadmap',
+  'dev-plan:history', 'dev-plan:roadmap-versions', 'dev-plan:team',
+  'dev-plan:initiatives'
+)
+  and jsonb_typeof(state.value) = 'array'
+on conflict (collection, record_id) do nothing;
+
+delete from public.portal_state where key in (
+  'dev-plan:products', 'dev-plan:demands', 'dev-plan:roadmap',
+  'dev-plan:history', 'dev-plan:roadmap-versions', 'dev-plan:team',
+  'dev-plan:initiatives'
+);
+
 create or replace function public.set_portal_state_updated_at()
 returns trigger
 language plpgsql

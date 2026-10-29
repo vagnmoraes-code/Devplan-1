@@ -12,7 +12,8 @@ const STATE_KEYS = new Set([
   "dev-plan:team",
   "dev-plan:initiatives",
 ]);
-const TABLE = "portal_state";
+const TABLE = "portal_records";
+const REPLACE_RPC = "replace_portal_records";
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
 
 function readEnvFile() {
@@ -41,6 +42,42 @@ function readEnvFile() {
 function sendJson(response, status, body) {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
   response.end(JSON.stringify(body));
+}
+
+function isCollectionPayload(records) {
+  return records.length > 0 && records.every(item =>
+    item && STATE_KEYS.has(item.key) && Array.isArray(item.value) &&
+    item.value.every(value => value && typeof value === "object" && !Array.isArray(value))
+  );
+}
+
+async function loadCollections(url, key) {
+  const query = "select=collection,record_id,position,value&order=collection.asc,position.asc,record_id.asc";
+  const records = [];
+  const pageSize = 1000;
+  for (let offset = 0; ; offset += pageSize) {
+    const response = await fetch(url + "/rest/v1/" + TABLE + "?" + query, {
+      headers: { apikey: key, "Range-Unit": "items", Range: offset + "-" + (offset + pageSize - 1) },
+    });
+    if (!response.ok) throw new Error("Supabase returned HTTP " + response.status + " while loading records.");
+    const page = await response.json();
+    records.push(...page);
+    if (page.length < pageSize) break;
+  }
+  const collections = new Map([...STATE_KEYS].map(collection => [collection, []]));
+  for (const record of records) {
+    if (collections.has(record.collection)) collections.get(record.collection).push(record.value);
+  }
+  return [...collections].map(([key, value]) => ({ key, value }));
+}
+
+async function replaceCollection(url, key, collection, records) {
+  const response = await fetch(url + "/rest/v1/rpc/" + REPLACE_RPC, {
+    method: "POST",
+    headers: { apikey: key, "content-type": "application/json" },
+    body: JSON.stringify({ p_collection: collection, p_records: records }),
+  });
+  if (!response.ok) throw new Error("Supabase returned HTTP " + response.status + " while saving records.");
 }
 
 async function readJson(request) {
@@ -108,33 +145,18 @@ export async function startApiServer() {
 
     try {
       if (request.method === "GET") {
-        const result = await fetch(`${url}/rest/v1/${TABLE}?select=key,value`, { headers: { apikey: key } });
-        if (!result.ok) {
-          console.error(`Supabase respondeu HTTP ${result.status} ao carregar os dados.`);
-          sendJson(response, 502, { error: "Não foi possível carregar os dados do Supabase." });
-          return;
-        }
-        sendJson(response, 200, { rows: await result.json() });
+        sendJson(response, 200, { rows: await loadCollections(url, key) });
         return;
       }
 
       if (request.method === "POST") {
         const payload = await readJson(request);
         const records = Array.isArray(payload) ? payload : [payload];
-        if (!records.length || records.some(item => !item || !STATE_KEYS.has(item.key) || !Object.hasOwn(item, "value"))) {
-          sendJson(response, 400, { error: "Chave de dados inválida." });
+        if (!isCollectionPayload(records)) {
+          sendJson(response, 400, { error: "Invalid collection data." });
           return;
         }
-        const result = await fetch(`${url}/rest/v1/${TABLE}?on_conflict=key`, {
-          method: "POST",
-          headers: { apikey: key, "content-type": "application/json", prefer: "resolution=merge-duplicates,return=minimal" },
-          body: JSON.stringify(records),
-        });
-        if (!result.ok) {
-          console.error(`Supabase respondeu HTTP ${result.status} ao salvar os dados.`);
-          sendJson(response, 502, { error: "Não foi possível salvar os dados no Supabase." });
-          return;
-        }
+        for (const record of records) await replaceCollection(url, key, record.key, record.value);
         sendJson(response, 200, { ok: true });
         return;
       }
