@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { isValidAccountList, loadAccountRows, replaceAccountRows } from "./supabase-accounts.mjs";
 
 const STATE_KEYS = new Set([
   "dev-plan:products",
@@ -10,7 +11,6 @@ const STATE_KEYS = new Set([
   "dev-plan:roadmap-versions",
   "dev-plan:team",
   "dev-plan:initiatives",
-  "roadmap.accounts.v1",
 ]);
 const TABLE = "portal_state";
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
@@ -60,6 +60,45 @@ export async function startApiServer() {
     const pathname = new URL(request.url || "/", "http://127.0.0.1").pathname;
     if (pathname === "/api/health" && request.method === "GET") {
       sendJson(response, 200, { ok: true });
+      return;
+    }
+    if (pathname === "/api/accounts") {
+      try {
+        if (request.method === "GET") {
+          const result = await loadAccountRows(url, key);
+          if (!result.ok) {
+            console.error(`Supabase respondeu HTTP ${result.status} ao carregar usuários.`);
+            sendJson(response, 502, { error: "Não foi possível carregar os usuários do Supabase." });
+            return;
+          }
+          sendJson(response, 200, { rows: await result.json() });
+          return;
+        }
+        if (request.method === "POST") {
+          const accounts = await readJson(request);
+          if (!isValidAccountList(accounts)) {
+            sendJson(response, 400, { error: "Lista de usuários inválida." });
+            return;
+          }
+          const result = await replaceAccountRows(url, key, accounts);
+          if (!result.ok) {
+            console.error(`Supabase respondeu HTTP ${result.status} ao salvar usuários.`);
+            sendJson(response, 502, { error: "Não foi possível salvar os usuários no Supabase." });
+            return;
+          }
+          sendJson(response, 200, { ok: true });
+          return;
+        }
+        response.setHeader("allow", "GET, POST");
+        sendJson(response, 405, { error: "Método não permitido." });
+      } catch (error) {
+        if (error instanceof SyntaxError || error.message === "Payload excede o limite permitido.") {
+          sendJson(response, 400, { error: error.message });
+          return;
+        }
+        console.error("Falha ao acessar usuários no Supabase:", error.name || "Erro de rede");
+        sendJson(response, 502, { error: "Falha de comunicação com o Supabase." });
+      }
       return;
     }
     if (pathname !== "/api/state") {

@@ -6,7 +6,6 @@ const STATE_KEYS = new Set([
   "dev-plan:roadmap-versions",
   "dev-plan:team",
   "dev-plan:initiatives",
-  "roadmap.accounts.v1",
 ]);
 
 const TABLE = "portal_state";

@@ -1,7 +1,7 @@
 ﻿export type AccessRole = "Administrador" | "Gestor" | "Visualização";
 export type Account = { id: string; name: string; email: string; role: AccessRole; productIds?: number[]; active?: boolean; lastAccessAt?: string; mustChangePassword?: boolean; salt: string; passwordHash: string };
 
-import { savePortalState } from "./database";
+import { savePortalAccounts } from "./database";
 
 const USERS_KEY = "roadmap.accounts.v1";
 const SESSION_KEY = "roadmap.session.v1";
@@ -36,7 +36,7 @@ export function loadAccounts(): Account[] {
       ? accounts.map(account => account.id === existing.id ? { ...account, email: ADMIN_EMAIL, role: "Administrador" as const, salt: initialAdmin.salt, passwordHash: initialAdmin.passwordHash } : account)
       : [initialAdmin, ...accounts];
     localStorage.setItem(USERS_KEY, JSON.stringify(next));
-    void savePortalState(USERS_KEY, next);
+    void savePortalAccounts(next);
     localStorage.setItem(ADMIN_SEED_KEY, "1");
     return next;
   } catch { return [initialAdmin]; }
@@ -44,7 +44,7 @@ export function loadAccounts(): Account[] {
 
 export function saveAccounts(accounts: Account[]) {
   localStorage.setItem(USERS_KEY, JSON.stringify(accounts));
-  void savePortalState(USERS_KEY, accounts);
+  void savePortalAccounts(accounts);
 }
 
 export function sessionId() {

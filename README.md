@@ -21,7 +21,7 @@ npm run build
 
 O projeto inclui a função `api/state.mjs`, usada pelo portal publicado para ler e salvar o estado no Supabase. No projeto da Vercel, configure as variáveis `SUPABASE_URL` e `SUPABASE_SECRET_KEY` em **Settings → Environment Variables** (Production e também Preview, se usar previews) e faça um novo deploy. Use os valores do projeto Supabase; não coloque a chave secreta em variáveis `VITE_*` nem no código do navegador.
 
-No Supabase, aplique `scripts/supabase-schema.sql` pelo SQL Editor. Se a configuração estiver correta e a tabela existir, a inicialização carrega o estado salvo no banco; se o banco ainda estiver vazio, ela migra os dados encontrados neste navegador.
+No Supabase, aplique `scripts/supabase-schema.sql` pelo SQL Editor. O script cria/atualiza `portal_state` e `portal_accounts` e migra as contas legadas de `portal_state` para a tabela dedicada. Reaplique o script após atualizar o portal para habilitar a gravação dos usuários em `portal_accounts`.
 
 ## Principais recursos
 
@@ -43,3 +43,4 @@ Entre com a conta de administrador configurada para este protótipo. Depois, o a
 Para usuários Editor e Visualização, o administrador seleciona os produtos permitidos. As telas de capacidade, demandas, roadmap e analytics mostram apenas os dados desses produtos. Administradores visualizam todos os produtos.
 
 Esta autenticação é **local ao navegador**: contas e hashes de senha ficam em `localStorage`, e a sessão fica em `sessionStorage` ou `localStorage` quando a opção de permanência está marcada. As permissões controlam a interface, mas não constituem proteção de dados contra alguém com acesso ao navegador ou às ferramentas de desenvolvimento. Para uso real com vários usuários, é necessário um servidor de autenticação, armazenamento central e verificação de permissões em cada operação da API.
+teste

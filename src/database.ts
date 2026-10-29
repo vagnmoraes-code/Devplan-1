@@ -6,7 +6,6 @@ const portalStateKeys = [
   "dev-plan:roadmap-versions",
   "dev-plan:team",
   "dev-plan:initiatives",
-  "roadmap.accounts.v1",
 ] as const;
 
 export type PortalStateKey = (typeof portalStateKeys)[number];
@@ -29,33 +28,96 @@ export async function savePortalState(key: string, value: unknown) {
   }
 }
 
+export async function savePortalAccounts(accounts: unknown[]) {
+  try {
+    const response = await fetch("/api/accounts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(accounts),
+    });
+    if (!response.ok) throw new Error("A API não confirmou a gravação dos usuários.");
+  } catch {
+    reportDatabaseError();
+  }
+}
+
+function accountFromDatabaseRow(row: Record<string, unknown>) {
+  return {
+    id: String(row.id ?? ""),
+    name: String(row.name ?? ""),
+    email: String(row.email ?? ""),
+    role: row.role === "Editor" ? "Gestor" : String(row.role ?? "Visualização"),
+    salt: String(row.salt ?? ""),
+    passwordHash: String(row.password_hash ?? ""),
+    ...(typeof row.active === "boolean" ? { active: row.active } : {}),
+    ...(typeof row.last_access_at === "string" ? { lastAccessAt: row.last_access_at } : {}),
+    ...(typeof row.must_change_password === "boolean" ? { mustChangePassword: row.must_change_password } : {}),
+    ...(Array.isArray(row.product_ids) ? { productIds: row.product_ids.filter(Number.isInteger) as number[] } : {}),
+  };
+}
+
+function storedAccounts(): unknown[] {
+  try {
+    const accounts = JSON.parse(localStorage.getItem("roadmap.accounts.v1") || "[]");
+    return Array.isArray(accounts) ? accounts : [];
+  } catch {
+    return [];
+  }
+}
+
+async function initializePortalAccounts(legacyRows: Array<{ key: string; value: unknown }>) {
+  const response = await fetch("/api/accounts");
+  if (!response.ok) throw new Error("Não foi possível carregar os usuários do banco.");
+
+  const { rows } = await response.json() as { rows: Array<Record<string, unknown>> };
+  if (rows.length) {
+    localStorage.setItem("roadmap.accounts.v1", JSON.stringify(rows.map(accountFromDatabaseRow)));
+    return;
+  }
+
+  const legacyAccounts = legacyRows.find(row => row.key === "roadmap.accounts.v1")?.value;
+  const legacy = Array.isArray(legacyAccounts) ? legacyAccounts : [];
+  const local = storedAccounts();
+  const mergedById = new Map<string, Record<string, unknown>>();
+  for (const account of [...legacy, ...local]) {
+    if (account && typeof account === "object" && typeof (account as Record<string, unknown>).id === "string") {
+      mergedById.set((account as Record<string, unknown>).id as string, account as Record<string, unknown>);
+    }
+  }
+  const accounts = [...mergedById.values()];
+  if (accounts.length) {
+    localStorage.setItem("roadmap.accounts.v1", JSON.stringify(accounts));
+    await savePortalAccounts(accounts);
+  }
+}
+
 export async function initializePortalDatabase() {
   const response = await fetch("/api/state");
   if (!response.ok) throw new Error("Banco indisponível ou tabela ainda não criada.");
 
   const { rows } = await response.json() as { rows: Array<{ key: string; value: unknown }> };
-  if (rows.length) {
-    for (const row of rows) {
-      if (portalStateKeys.includes(row.key as PortalStateKey)) localStorage.setItem(row.key, JSON.stringify(row.value));
+  const stateRows = rows.filter(row => portalStateKeys.includes(row.key as PortalStateKey));
+  for (const row of stateRows) localStorage.setItem(row.key, JSON.stringify(row.value));
+
+  if (!stateRows.length) {
+    const localRows = portalStateKeys.flatMap(key => {
+      const saved = localStorage.getItem(key);
+      if (saved === null) return [];
+      try {
+        return [{ key, value: JSON.parse(saved) }];
+      } catch {
+        return [{ key, value: saved }];
+      }
+    });
+    if (localRows.length) {
+      const seedResponse = await fetch("/api/state", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(localRows),
+      });
+      if (!seedResponse.ok) throw new Error("Não foi possível migrar os dados locais.");
     }
-    return;
   }
 
-  const localRows = portalStateKeys.flatMap(key => {
-    const saved = localStorage.getItem(key);
-    if (saved === null) return [];
-    try {
-      return [{ key, value: JSON.parse(saved) }];
-    } catch {
-      return [{ key, value: saved }];
-    }
-  });
-  if (localRows.length) {
-    const seedResponse = await fetch("/api/state", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(localRows),
-    });
-    if (!seedResponse.ok) throw new Error("Não foi possível migrar os dados locais.");
-  }
+  await initializePortalAccounts(rows);
 }
