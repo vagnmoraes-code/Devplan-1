@@ -1,49 +1,17 @@
 ﻿export type AccessRole = "Administrador" | "Gestor" | "Visualização";
 export type Account = { id: string; name: string; email: string; role: AccessRole; productIds?: number[]; active?: boolean; approved?: boolean; lastAccessAt?: string; mustChangePassword?: boolean; salt: string; passwordHash: string };
 
-import { savePortalAccounts } from "./database";
+import { readPortalAccounts, savePortalAccounts } from "./database";
 
-const USERS_KEY = "roadmap.accounts.v1";
 const SESSION_KEY = "roadmap.session.v1";
 const REMEMBERED_SESSION_KEY = "roadmap.remembered-session.v1";
-const ADMIN_SEED_KEY = "roadmap.admin-seed.v3";
-export const ADMIN_EMAIL = "vagnersmoraes@hotmail.com";
-const initialAdmin: Account = {
-  id: "default-admin",
-  name: "Vagner Moraes",
-  email: ADMIN_EMAIL,
-  role: "Administrador",
-  salt: "cd262607c7dc0cd16fd5977c6a40ab87",
-  passwordHash: "274e22f3f2146c5747ede780fcbbff54b2d301d05a3910a0cbad98bd912e437f",
-};
 
 export function loadAccounts(): Account[] {
-  try {
-    const value = JSON.parse(localStorage.getItem(USERS_KEY) || "[]");
-    let accounts: Account[] = Array.isArray(value) ? value : [];
-    if (!localStorage.getItem("roadmap.account-labels-v2")) {
-      accounts = accounts.map(account => ({
-        ...account,
-        ...(account.email?.toLowerCase() === ADMIN_EMAIL ? { name: "Vagner Moraes" } : {}),
-        ...(String(account.role) === "Editor" ? { role: "Gestor" as const } : {}),
-      }));
-      localStorage.setItem(USERS_KEY, JSON.stringify(accounts));
-      localStorage.setItem("roadmap.account-labels-v2", "1");
-    }
-    if (localStorage.getItem(ADMIN_SEED_KEY)) return accounts;
-    const existing = accounts.find(account => account.email?.toLowerCase() === ADMIN_EMAIL);
-    const next = existing
-      ? accounts.map(account => account.id === existing.id ? { ...account, email: ADMIN_EMAIL, role: "Administrador" as const, salt: initialAdmin.salt, passwordHash: initialAdmin.passwordHash } : account)
-      : [initialAdmin, ...accounts];
-    localStorage.setItem(USERS_KEY, JSON.stringify(next));
-    void savePortalAccounts(next);
-    localStorage.setItem(ADMIN_SEED_KEY, "1");
-    return next;
-  } catch { return [initialAdmin]; }
+  const accounts = readPortalAccounts();
+  return Array.isArray(accounts) ? accounts as Account[] : [];
 }
 
-export function saveAccounts(accounts: Account[]): Promise<boolean> {
-  localStorage.setItem(USERS_KEY, JSON.stringify(accounts));
+export async function saveAccounts(accounts: Account[]): Promise<boolean> {
   return savePortalAccounts(accounts);
 }
 

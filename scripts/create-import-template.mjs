@@ -21,40 +21,13 @@ sheet.columns = [
   { header: "Observações", key: "observacoes", width: 45 },
 ];
 
-sheet.addRows([
-  {
-    demanda: "Novo fluxo CIOT",
-    produto: "Commerce",
-    categoria: "Evolutiva",
-    prioridade: "Alta",
-    status: "Planejada",
-    versao: "5.2",
-    capacidade: 160,
-    inicio: "01/07/2026",
-    prazo: "30/09/2026",
-    observacoes: "Linha de exemplo — substitua pelos dados reais",
-  },
-  {
-    demanda: "Melhorias na API",
-    produto: "Payments",
-    categoria: "Técnica",
-    prioridade: "Média",
-    status: "Backlog",
-    versao: "5.3",
-    capacidade: 80,
-    inicio: "15/07/2026",
-    prazo: "20/09/2026",
-    observacoes: "Produto deve estar previamente cadastrado e ativo",
-  },
-]);
-
 const header = sheet.getRow(1);
 header.height = 28;
 header.font = { bold: true, color: { argb: "FFFFFFFF" } };
 header.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF246BFD" } };
 header.alignment = { vertical: "middle", horizontal: "center" };
 
-sheet.autoFilter = { from: "A1", to: "J3" };
+sheet.autoFilter = { from: "A1", to: "J1" };
 sheet.getColumn("capacidade").numFmt = "0";
 
 for (let row = 2; row <= 501; row += 1) {

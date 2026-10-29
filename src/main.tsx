@@ -29,30 +29,19 @@ import "./capacity.css";
 import "./changes.css";
 import "./demands.css";
 import "./initiatives.css";
-import capacitySeed from "./capacity-seed.json";
-import { savePortalState } from "./database";
-import { ADMIN_EMAIL, Account, AccessRole, hashPassword, loadAccounts, makeAccount, saveAccounts, sessionId, setSession, updateAccountPassword } from "./auth";
+import { readPortalState, savePortalState } from "./database";
+import { Account, AccessRole, hashPassword, loadAccounts, makeAccount, saveAccounts, sessionId, setSession, updateAccountPassword } from "./auth";
 
 function usePersistentState<T>(key: string, initialValue: T | (() => T)) {
   const [value, setValue] = useState<T>(() => {
-    try {
-      const saved = localStorage.getItem(key);
-      if (saved !== null) return JSON.parse(saved) as T;
-    } catch {
-      // Mantém os dados iniciais caso o armazenamento esteja indisponível/corrompido.
-    }
-    return typeof initialValue === "function"
+    const fallback = typeof initialValue === "function"
       ? (initialValue as () => T)()
       : initialValue;
+    return readPortalState(key, fallback);
   });
 
   useEffect(() => {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-      void savePortalState(key, value);
-    } catch {
-      // A aplicação continua funcional mesmo sem acesso ao armazenamento local.
-    }
+    void savePortalState(key, value);
   }, [key, value]);
 
   return [value, setValue] as const;
@@ -110,6 +99,8 @@ type Product = {
   active: boolean;
 };
 const ProductAccessContext = createContext<Set<number> | null>(null);
+const CurrentAccountContext = createContext<Account | null>(null);
+function useCurrentAccount() { return useContext(CurrentAccountContext); }
 function scopedSetter<T>(setValue: React.Dispatch<React.SetStateAction<T[]>>, isVisible: (item: T) => boolean): React.Dispatch<React.SetStateAction<T[]>> {
   return update => setValue(current => {
     const visible = current.filter(isVisible);
@@ -122,85 +113,12 @@ function useAllowedProductNames() {
   const catalog = useContext(ProductContext);
   return allowedIds === null ? null : new Set((catalog?.products || []).filter(product => allowedIds.has(product.id)).map(product => product.name));
 }
-const initialProducts: Product[] = [
-  { id: 2, name: "nddCargo", code: "CARGO", description: "", team: "Squad nddCargo", coordinator: "Rafael Lima", active: true },
-  { id: 5, name: "CIOT FÁCIL", code: "CIOT", description: "", team: "Squad CIOT FÁCIL", coordinator: "Bianca Melo", active: true },
-];
-const legacyProductNames: Record<string,string> = { Commerce: "nddMove", Payments: "nddCargo", Customer: "nddElog", Platform: "nddFrete", Analytics: "CIOT FÁCIL" };
-function migrateProducts() {
-  try {
-    if (!localStorage.getItem("dev-plan:products-v2")) {
-      // Atualiza referências do conjunto demonstrativo antigo sem apagar demandas ou capacidade.
-      for (const key of ["dev-plan:demands", "dev-plan:team", "dev-plan:history", "dev-plan:roadmap-versions"]) {
-        const raw = localStorage.getItem(key);
-        if (!raw) continue;
-        const value = JSON.parse(raw);
-        const replace = (item:unknown):unknown => {
-          if (Array.isArray(item)) return item.map(replace);
-          if (item && typeof item === "object") return Object.fromEntries(Object.entries(item).map(([field,content]) => [field, field === "product" && typeof content === "string" ? legacyProductNames[content] ?? content : replace(content)]));
-          return item;
-        };
-        localStorage.setItem(key, JSON.stringify(replace(value)));
-      }
-      localStorage.setItem("dev-plan:products-v2", "1");
-    }
-
-    const removalMigrationKey = "dev-plan:product-removals-v1";
-    if (!localStorage.getItem(removalMigrationKey)) {
-      let products: Product[] = initialProducts;
-      try {
-        const stored = JSON.parse(localStorage.getItem("dev-plan:products") || "null");
-        if (Array.isArray(stored)) products = stored;
-      } catch { /* Usa a lista inicial quando o catálogo local estiver inválido. */ }
-      const removedNames = new Set(["nddmove", "nddfrete", "nddelog"]);
-      localStorage.setItem("dev-plan:products", JSON.stringify(products.filter(product => !removedNames.has(product.name.toLowerCase()))));
-      localStorage.setItem(removalMigrationKey, "1");
-    }
-  } catch { /* Mantém os dados locais quando o armazenamento não estiver disponível. */ }
-}
-migrateProducts();
-function migrateDemandStatuses() {
-  const migrationKey = "dev-plan:demand-statuses-v2";
-  try {
-    if (localStorage.getItem(migrationKey)) return;
-    const raw = localStorage.getItem("dev-plan:demands");
-    if (raw) {
-      const statusMap: Record<string, string> = { Planejada: "Planejado", "Em análise": "Em Estudos", "Em andamento": "Em Desenvolvimento", Desenvolvimento: "Em Desenvolvimento", "Em testes": "Em Desenvolvimento", Homologação: "Em Desenvolvimento", Concluída: "Concluído", Cancelada: "Cancelado", Bloqueada: "Bloqueado" };
-      const rows = JSON.parse(raw);
-      if (Array.isArray(rows)) localStorage.setItem("dev-plan:demands", JSON.stringify(rows.map(item => ({ ...item, status: statusMap[item.status] || item.status }))));
-    }
-    localStorage.setItem(migrationKey, "1");
-  } catch { /* Mantém os dados atuais caso o armazenamento local esteja indisponível. */ }
-}
-migrateDemandStatuses();
-function migrateDemandOwners() {
-  const migrationKey = "dev-plan:demand-owners-higor-v2";
-  try {
-    if (localStorage.getItem(migrationKey)) return;
-    const raw = localStorage.getItem("dev-plan:demands");
-    if (raw) {
-      const rows = JSON.parse(raw);
-      if (Array.isArray(rows)) localStorage.setItem("dev-plan:demands", JSON.stringify(rows.map(item => ({ ...item, owner: "Higor de Jesus" }))));
-    }
-    localStorage.setItem(migrationKey, "1");
-  } catch { /* Mantém os dados se o armazenamento local estiver indisponível. */ }
-}
-migrateDemandOwners();
-function clearStoredRoadmapVersions() {
-  const migrationKey = "dev-plan:roadmap-versions-cleared-v1";
-  try {
-    if (localStorage.getItem(migrationKey)) return;
-    localStorage.setItem("dev-plan:roadmap-versions", "[]");
-    localStorage.setItem(migrationKey, "1");
-  } catch { /* O portal continua funcionando se o armazenamento local estiver indisponível. */ }
-}
-clearStoredRoadmapVersions();
 const ProductContext = createContext<{
   products: Product[];
   setProducts: React.Dispatch<React.SetStateAction<Product[]>>;
 } | null>(null);
 function ProductProvider({ children }: { children: React.ReactNode }) {
-  const [products, setProducts] = usePersistentState<Product[]>("dev-plan:products", initialProducts);
+  const [products, setProducts] = usePersistentState<Product[]>("dev-plan:products", []);
   return (
     <ProductContext.Provider value={{ products, setProducts }}>
       {children}
@@ -228,80 +146,6 @@ type RoadmapVersion = {
   entries: RoadmapEntry[];
   demands: Demand[];
 };
-const demands: Demand[] = [
-  ...[
-    "[OXXO] Integrar filiais do SAP para Frete",
-    "Gerenciamento de transmissões",
-    "Sincronização de ocorrência parametrizáveis (Move)",
-    "Tratar performance e telas lentas",
-    "Analisar componentes que impedem seleção",
-    "Atualizar componentes NDS",
-  ].map((name, index) => ({
-    id: `DEV-${160 + index}`,
-    name,
-    product: "nddFrete",
-    owner: "",
-    status: "Backlog",
-    priority: "Média",
-    effort: 0,
-    progress: 0,
-    due: "Sem prazo",
-    risk: "Baixo",
-    resourceIds: [],
-  })),
-  ...[
-    "Unificar Move x Elog - Migração de Mapas para OpenStreetMap",
-    "Projeto GEQ: Alertas",
-    "Projeto GEQ: Gestão de Custos extras",
-    "Projeto GEQ: Sequenciamento no APP",
-    "Onde está minha entrega? - visão cliente final",
-    "Dashboards direto no portal ( BI Move > Elog)",
-    "Projeto GEQ: Motorista -  Disponibilizar-se para carregamento",
-  ].map((name, index) => ({
-    id: `DEV-${166 + index}`,
-    name,
-    product: "nddMove",
-    owner: "",
-    status: "Backlog",
-    priority: "Média",
-    effort: 0,
-    progress: 0,
-    due: "Sem prazo",
-    risk: "Baixo",
-    resourceIds: [],
-  })),
-];
-function replaceRegisteredDemands() {
-  try {
-    if (localStorage.getItem("dev-plan:demands-v2")) return;
-    if (localStorage.getItem("dev-plan:demands") === null) localStorage.setItem("dev-plan:demands", JSON.stringify(demands));
-    if (localStorage.getItem("dev-plan:roadmap") === null) localStorage.setItem("dev-plan:roadmap", "[]");
-    if (localStorage.getItem("dev-plan:history") === null) localStorage.setItem("dev-plan:history", "[]");
-    if (localStorage.getItem("dev-plan:roadmap-versions") === null) localStorage.setItem("dev-plan:roadmap-versions", "[]");
-    localStorage.setItem("dev-plan:demands-v2", "1");
-  } catch { /* A lista inicial continua disponível sem armazenamento local. */ }
-}
-replaceRegisteredDemands();
-function addMoveDemandsToStoredData() {
-  try {
-    if (localStorage.getItem("dev-plan:move-demands-v1")) return;
-    const stored = JSON.parse(localStorage.getItem("dev-plan:demands") || "[]");
-    const rows: Demand[] = Array.isArray(stored) ? stored : [];
-    const moveDemands = demands.filter(demand => demand.product === "nddMove");
-    const missing = moveDemands.filter(demand => !rows.some(row => row.product === demand.product && row.name === demand.name));
-    const usedIds = new Set(rows.map(row => row.id));
-    const next = missing.map(demand => {
-      let id = demand.id;
-      let number = 173;
-      while (usedIds.has(id)) id = `DEV-${number++}`;
-      usedIds.add(id);
-      return { ...demand, id };
-    });
-    localStorage.setItem("dev-plan:demands", JSON.stringify([...rows, ...next]));
-    localStorage.setItem("dev-plan:move-demands-v1", "1");
-  } catch { /* Os dados iniciais continuam disponíveis sem armazenamento local. */ }
-}
-addMoveDemandsToStoredData();
 const DemandContext = createContext<{
   rows: Demand[];
   setRows: React.Dispatch<React.SetStateAction<Demand[]>>;
@@ -313,7 +157,7 @@ const DemandContext = createContext<{
   setVersions: React.Dispatch<React.SetStateAction<RoadmapVersion[]>>;
 } | null>(null);
 function DemandProvider({ children }: { children: React.ReactNode }) {
-  const [rows, setRows] = usePersistentState<Demand[]>("dev-plan:demands", demands);
+  const [rows, setRows] = usePersistentState<Demand[]>("dev-plan:demands", []);
   const [roadmap, setRoadmap] = usePersistentState<RoadmapEntry[]>(
     "dev-plan:roadmap",
     [],
@@ -360,14 +204,6 @@ const nav: [Page, any][] = [
   ["Usuários", I.UserCog],
 ];
 const mainNavPages: Page[] = ["Visão geral", "Demandas", "Roadmap", "Iniciativas", "Baseline", "Visibilidade Entregas", "Analytics"];
-const trend = [
-  { w: "S1", plan: 22, done: 18 },
-  { w: "S2", plan: 34, done: 28 },
-  { w: "S3", plan: 48, done: 42 },
-  { w: "S4", plan: 62, done: 56 },
-  { w: "S5", plan: 76, done: 66 },
-  { w: "S6", plan: 88, done: 78 },
-];
 const C = {
   blue: "#7052f5",
   cyan: "#38bdf8",
@@ -407,7 +243,7 @@ function PageHead({
   return (
     <div className="pagehead">
       <div>
-        <div className="eyebrow">Q3 2026 · PLANEJAMENTO ATIVO</div>
+        <div className="eyebrow">PORTAL DE PLANEJAMENTO</div>
         <h1>{title}</h1>
         <p>{desc}</p>
       </div>
@@ -436,6 +272,7 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const [productFilter, setProductFilter] = useState("Todos");
   const [capacityQuarter, setCapacityQuarter] = useState(currentQuarter);
   const scoped = productFilter === "Todos" ? rows : rows.filter((d) => d.product === productFilter);
+  const progressTrend = [...scoped].sort((a, b) => a.id.localeCompare(b.id)).slice(-6).map(demand => ({ w: demand.id, progress: demand.progress }));
   const scopedIds = new Set(scoped.map((d) => d.id));
   const planned = roadmap.filter((item) => scopedIds.has(item.demandId));
   const effort = scoped.reduce((sum, demand) => sum + demand.effort, 0);
@@ -500,6 +337,7 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const coordinationCapacity = coordinationTeam.reduce((sum, person) => sum + person.total, 0);
   const specialistCapacity = specialistTeam.reduce((sum, person) => sum + person.total, 0);
   const progress = scoped.length ? Math.round(scoped.reduce((sum, d) => sum + d.progress, 0) / scoped.length) : 0;
+  const criticalDemands = scoped.filter(demand => ["alto", "crítico", "critico"].includes(demand.risk.trim().toLocaleLowerCase("pt-BR"))).length;
   const kpis = [
     ["Capacidade total", `${totalCapacity}h`, `${utilization}% alocada · ${scopedTeam.length} colaboradores`, utilization > 90 ? "bad" : "blue", I.Users],
     ["Capacidade estimada", `${effort}h`, `${scoped.length} demandas`, "warn", I.Gauge],
@@ -525,7 +363,7 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
             </div>
             <strong>{v}</strong>
             <small className={t}>
-              {t === "bad" ? "↑" : "↗"} {d} <span>vs. Q2</span>
+              {d}
             </small>
           </Card>
         ))}
@@ -600,14 +438,13 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
         <Card>
           <div className="cardhead">
             <div>
-              <h3>Progresso do roadmap</h3>
-              <p>Planejado vs. realizado</p>
+              <h3>Progresso das demandas</h3>
+              <p>Percentual registrado para as demandas do banco</p>
             </div>
-            <Badge tone="good">+6,4%</Badge>
           </div>
           <div className="chart">
             <ResponsiveContainer>
-              <AreaChart data={trend}>
+              <AreaChart data={progressTrend}>
                 <defs>
                   <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
                     <stop stopColor={C.blue} stopOpacity=".22" />
@@ -616,18 +453,12 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
                 </defs>
                 <CartesianGrid vertical={false} />
                 <XAxis dataKey="w" />
-                <YAxis />
+                <YAxis domain={[0, 100]} />
                 <Tooltip />
                 <Area
                   type="monotone"
-                  dataKey="plan"
-                  stroke="#a9b5c7"
-                  fill="transparent"
-                  strokeDasharray="4 4"
-                />
-                <Area
-                  type="monotone"
-                  dataKey="done"
+                  dataKey="progress"
+                  name="Progresso (%)"
                   stroke={C.blue}
                   fill="url(#g)"
                   strokeWidth={3}
@@ -636,8 +467,8 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
             </ResponsiveContainer>
           </div>
           <div className="progressfoot">
-            <b>14 de 18 demandas no prazo</b>
-            <span>78% concluído ou em curso</span>
+            <b>{completed} de {scoped.length} demandas concluídas</b>
+            <span>{progress}% de progresso médio</span>
           </div>
         </Card>
       </div>
@@ -665,7 +496,7 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
             <ResponsiveContainer>
               <PieChart>
                 <Pie
-                  data={[{ v: 78 }, { v: 22 }]}
+                  data={[{ v: progress }, { v: 100 - progress }]}
                   dataKey="v"
                   innerRadius={62}
                   outerRadius={78}
@@ -678,9 +509,9 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
               </PieChart>
             </ResponsiveContainer>
             <div>
-              <strong>78</strong>
+              <strong>{progress}</strong>
               <span>/100</span>
-              <small>SAUDÁVEL</small>
+              <small>{scoped.length ? "COM DADOS" : "SEM DADOS"}</small>
             </div>
           </div>
           <div className="health">
@@ -689,21 +520,21 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
                 <i className="good" />
                 Prazo
               </span>
-              <b>82%</b>
+              <b>{scoped.length ? `${scoped.filter(demand => demand.due && new Date(demand.due) >= new Date()).length} no prazo` : "Sem dados"}</b>
             </p>
             <p>
               <span>
                 <i className="warn" />
                 Capacidade
               </span>
-              <b>91%</b>
+              <b>{utilization}%</b>
             </p>
             <p>
               <span>
                 <i className="bad" />
                 Risco
               </span>
-              <b>3 críticos</b>
+              <b>{criticalDemands} críticas</b>
             </p>
           </div>
         </Card>
@@ -741,6 +572,7 @@ function ExecutiveView() {
 }
 
 function DemandTable({ compact = false }: { compact?: boolean }) {
+  const { rows: demands } = useDemands();
   const rows = compact ? demands.slice(0, 4) : demands;
   return (
     <div className="tablewrap">
@@ -825,6 +657,7 @@ const quarterCount = Math.max(8, (now.getFullYear() - 2026 + 2) * 4);
 const quarters = Array.from({ length: quarterCount }, (_, index) => `Q${index % 4 + 1} ${2026 + Math.floor(index / 4)}`);
 
 function Roadmap() {
+  const currentAccount = useCurrentAccount();
   const { rows, roadmap, setRoadmap, setHistory, versions, setVersions } = useDemands();
   const { team } = useTeam();
   const { products } = useProducts();
@@ -845,7 +678,7 @@ function Roadmap() {
   const pickerProducts = products.filter(product => product.active).map(product => product.name);
   const openPicker = () => { setPickerProduct(productFilter === "Todos" ? "" : productFilter); setPicker(true); };
   const months = quarterMonths[quarter.slice(0, 2)];
-  const register=(title:string,detail:string,tone:ChangeLog["tone"]="blue",eventQuarter?:string)=>{const demandId=detail.match(/DEV-\d+/)?.[0];const demand=rows.find((d)=>d.id===demandId);setHistory((current)=>[{id:Date.now(),date:new Date().toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}),title,actor:"Vagner Moraes",detail,tone,product:demand?.product,quarter:eventQuarter,demandId,demandName:demand?.name},...current])};
+  const register=(title:string,detail:string,tone:ChangeLog["tone"]="blue",eventQuarter?:string)=>{const demandId=detail.match(/DEV-\d+/)?.[0];const demand=rows.find((d)=>d.id===demandId);setHistory((current)=>[{id:Date.now(),date:new Date().toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}),title,actor:currentAccount?.name??"Usuário",detail,tone,product:demand?.product,quarter:eventQuarter,demandId,demandName:demand?.name},...current])};
   const createVersion = () => {
     const entries = roadmap.filter((entry) => entry.quarter === quarter);
     const demandIds = new Set(entries.map((entry) => entry.demandId));
@@ -856,7 +689,7 @@ function Roadmap() {
       entries: structuredClone(entries),
       demands: structuredClone(rows.filter((demand) => demandIds.has(demand.id))),
     }]);
-    setHistory((current) => [{id:Date.now(),date:new Date().toLocaleString("pt-BR"),title:`Versão V${version} do Roadmap criada`,actor:"Vagner Moraes",detail:`Snapshot de ${entries.length} demanda(s) preservado para ${quarter}`,tone:"good",quarter},...current]);
+    setHistory((current) => [{id:Date.now(),date:new Date().toLocaleString("pt-BR"),title:`Versão V${version} do Roadmap criada`,actor:currentAccount?.name??"Usuário",detail:`Snapshot de ${entries.length} demanda(s) preservado para ${quarter}`,tone:"good",quarter},...current]);
   };
   const add = (id: string) => {
     if (roadmap.some(item => item.demandId === id)) return;
@@ -1249,7 +1082,7 @@ const emptyDemandForm = {
   actualEffort: "",
   billable: "false",
   billedAmount: "",
-  owner: "Higor de Jesus",
+  owner: "",
   dependencies: "",
   justification: "",
   impact: "",
@@ -1263,6 +1096,7 @@ const displayDemandStatus = (status: string) => {
   return status;
 };
 function Demands() {
+  const currentAccount = useCurrentAccount();
   const [q, setQ] = useState("");
   const { rows, setRows, roadmap, setRoadmap, setHistory } = useDemands();
   const { products } = useProducts();
@@ -1387,7 +1221,7 @@ function Demands() {
       id: editing?.id || `DEV-${160 + rows.length}`,
       name: form.name.trim(),
       product: form.product,
-      owner: form.owner.trim() || "Higor de Jesus",
+      owner: form.owner.trim() || "",
       status: form.status,
       priority: form.priority,
       effort: Number(form.effort),
@@ -1414,7 +1248,7 @@ function Demands() {
     );
     if(!editing && form.planningQuarter!=="Planejamento"){
       setRoadmap((current)=>[...current,{demandId:data.id,quarter:form.planningQuarter,collaborators:[],allocations:[]}]);
-      setHistory((current)=>[{id:Date.now(),date:new Date().toLocaleString("pt-BR"),title:"Demanda planejada no cadastro",actor:"Vagner Moraes",detail:`${data.id} incluída em ${form.planningQuarter}`,tone:"good",product:data.product,quarter:form.planningQuarter},...current]);
+      setHistory((current)=>[{id:Date.now(),date:new Date().toLocaleString("pt-BR"),title:"Demanda planejada no cadastro",actor:currentAccount?.name??"Conta ativa",detail:`${data.id} incluída em ${form.planningQuarter}`,tone:"good",product:data.product,quarter:form.planningQuarter},...current]);
     }
     close();
     setSaved(true);
@@ -1422,7 +1256,7 @@ function Demands() {
   };
   const openQuickEdit = (demand: Demand) => {
     setQuickEditing(demand);
-    setQuickForm({ progress: String(demand.progress), actualEffort: demand.actualEffort === undefined ? "" : String(demand.actualEffort), due: demand.dueDate || "", type: demand.type || "Evolutiva", owner: demand.owner || "Higor de Jesus" });
+    setQuickForm({ progress: String(demand.progress), actualEffort: demand.actualEffort === undefined ? "" : String(demand.actualEffort), due: demand.dueDate || "", type: demand.type || "Evolutiva", owner: demand.owner || "" });
     setQuickError("");
   };
   const saveQuickEdit = (event: React.FormEvent) => {
@@ -1437,7 +1271,7 @@ function Demands() {
     const due = quickForm.due ? new Date(`${quickForm.due}T12:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }).replace(".", "") : quickEditing.dueDate ? "Sem prazo" : quickEditing.due;
     const wasCompleted = ["Concluído", "Concluída"].includes(quickEditing.status);
     setRows(current => current.map(demand => demand.id === quickEditing.id ? {
-      ...demand, progress, actualEffort: quickForm.actualEffort.trim() === "" ? undefined : actualEffort, due, dueDate: quickForm.due, type: quickForm.type, owner: quickForm.owner.trim() || "Higor de Jesus",
+      ...demand, progress, actualEffort: quickForm.actualEffort.trim() === "" ? undefined : actualEffort, due, dueDate: quickForm.due, type: quickForm.type, owner: quickForm.owner.trim() || "",
       status: progress === 100 ? "Concluído" : wasCompleted ? (progress === 0 ? "Backlog" : "Desenvolvimento") : demand.status,
     } : demand));
     setQuickEditing(null);
@@ -1453,7 +1287,7 @@ function Demands() {
       id: Date.now(),
       date: new Date().toLocaleString("pt-BR"),
       title: "Demanda excluída",
-      actor: "Vagner Moraes",
+      actor: currentAccount?.name ?? "Usuário",
       detail: `${removed.id} removida da gestão de demandas e do Roadmap`,
       tone: "bad",
       product: removed.product,
@@ -2149,56 +1983,12 @@ function normalizeStaffRole(role: string) {
   if (normalized === "ESPECIALISTA" || normalized === "ESPECIALISTA DEV 1") return "Especialista DEV 1";
   return role.trim();
 }
-const initialStaff: Staff[] = capacitySeed.map(person => ({ ...person, role: normalizeStaffRole(person.role) }));
-function replaceRegisteredStaff() {
-  try {
-    if (localStorage.getItem("dev-plan:team-spreadsheet-v1")) return;
-    if (localStorage.getItem("dev-plan:team") === null) localStorage.setItem("dev-plan:team", JSON.stringify(initialStaff));
-    localStorage.setItem("dev-plan:team-spreadsheet-v1", "1");
-  } catch { /* A lista da planilha continua disponível sem armazenamento local. */ }
-}
-replaceRegisteredStaff();
-function setQuarterlyStaffCapacity() {
-  const migrationKey = "dev-plan:quarterly-capacity-400-v1";
-  try {
-    if (localStorage.getItem(migrationKey)) return;
-    const raw = localStorage.getItem("dev-plan:team");
-    const stored: Staff[] = raw ? JSON.parse(raw) : initialStaff;
-    localStorage.setItem("dev-plan:team", JSON.stringify(stored.map(person => ({ ...person, total: 400 }))));
-    localStorage.setItem(migrationKey, "1");
-  } catch { /* Mantém os dados se o armazenamento local estiver indisponível. */ }
-}
-setQuarterlyStaffCapacity();
-function correctStaffProductsFromSpreadsheet() {
-  try {
-    if (localStorage.getItem("dev-plan:team-products-v2")) return;
-    const raw = localStorage.getItem("dev-plan:team");
-    const stored: Staff[] = raw ? JSON.parse(raw) : initialStaff;
-    const productByName = new Map(initialStaff.map(person => [person.name, person.product]));
-    localStorage.setItem("dev-plan:team", JSON.stringify(stored.map(person => ({
-      ...person,
-      product: productByName.get(person.name) ?? person.product,
-    }))));
-    localStorage.setItem("dev-plan:team-products-v2", "1");
-  } catch { /* A lista inicial já contém os produtos corrigidos. */ }
-}
-correctStaffProductsFromSpreadsheet();
-function normalizeRegisteredStaffRoles() {
-  try {
-    if (localStorage.getItem("dev-plan:team-roles-v2")) return;
-    const raw = localStorage.getItem("dev-plan:team");
-    const stored: Staff[] = raw ? JSON.parse(raw) : initialStaff;
-    localStorage.setItem("dev-plan:team", JSON.stringify(stored.map(person => ({ ...person, role: normalizeStaffRole(person.role) }))));
-    localStorage.setItem("dev-plan:team-roles-v2", "1");
-  } catch { /* A lista inicial já usa as funções atualizadas. */ }
-}
-normalizeRegisteredStaffRoles();
 const TeamContext = createContext<{
   team: Staff[];
   setTeam: React.Dispatch<React.SetStateAction<Staff[]>>;
 } | null>(null);
 function TeamProvider({ children }: { children: React.ReactNode }) {
-  const [team, setTeam] = usePersistentState<Staff[]>("dev-plan:team", initialStaff);
+  const [team, setTeam] = usePersistentState<Staff[]>("dev-plan:team", []);
   return (
     <TeamContext.Provider value={{ team, setTeam }}>
       {children}
@@ -2490,7 +2280,7 @@ function Capacity() {
                   autoFocus
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="Ex.: Ana Oliveira"
+                  placeholder="Nome completo"
                   className={error && !form.name ? "invalid" : ""}
                 />
               </div>
@@ -2632,6 +2422,8 @@ function Planning() {
   </>;
 }
 function Risks() {
+  const { rows } = useDemands();
+  const riskDemands = rows.filter(demand => ["alto", "crítico", "critico"].includes(demand.risk.trim().toLocaleLowerCase("pt-BR")));
   return (
     <>
       <PageHead
@@ -2662,13 +2454,7 @@ function Risks() {
                 <b>{r}</b>
                 {[0, 1, 2, 3].map((_, ci) => (
                   <div className={"cell c" + Math.min(3, ci + (2 - ri))}>
-                    {ri === 0 && ci === 2 ? (
-                      <i>2</i>
-                    ) : ri === 1 && ci === 3 ? (
-                      <i>1</i>
-                    ) : (
-                      ""
-                    )}
+                    {""}
                   </div>
                 ))}
               </React.Fragment>
@@ -2682,101 +2468,22 @@ function Risks() {
               <p>Ordenados por exposição</p>
             </div>
           </div>
-          {[
-            "Dependência da API antifraude",
-            "Capacidade de backend em setembro",
-            "Prazo regulatório inegociável",
-          ].map((x, i) => (
-            <div className="riskitem">
+          {riskDemands.length ? riskDemands.map((demand, i) => (
+            <div className="riskitem" key={demand.id}>
               <span className={"risknum r" + i}>{i + 1}</span>
               <div>
-                <b>{x}</b>
-                <small>
-                  {
-                    [
-                      "DEV-148 · Rafael Lima",
-                      "Time Backend · Marina Costa",
-                      "DEV-154 · Lucas Rocha",
-                    ][i]
-                  }
-                </small>
+                <b>{demand.name}</b>
+                <small>{demand.id} · {demand.owner || "Sem responsável"}</small>
               </div>
-              <Badge tone={i === 2 ? "bad" : "warn"}>
-                {i === 2 ? "Crítico" : "Alto"}
-              </Badge>
+              <Badge tone={demand.risk.toLocaleLowerCase("pt-BR").startsWith("crít") || demand.risk.toLocaleLowerCase("pt-BR").startsWith("crit") ? "bad" : "warn"}>{demand.risk}</Badge>
             </div>
-          ))}
+          )) : <div className="executive-empty"><I.ShieldCheck/><span>{rows.length ? "Nenhuma demanda de alto risco cadastrada." : "Nenhuma demanda cadastrada no banco."}</span></div>}
         </Card>
       </div>
     </>
   );
 }
 
-function LegacyChanges() {
-  return (
-    <>
-      <PageHead
-        title="Mudanças do roadmap"
-        desc="Rastreabilidade completa das decisões que alteraram o trimestre."
-        action={
-          <button className="primary">
-            <I.Plus /> Registrar mudança
-          </button>
-        }
-      />
-      <Card>
-        {[
-          [
-            "Hoje, 14:32",
-            "DEV-154 adicionada ao trimestre",
-            "Vagner Moraes",
-            "+60h · impacto alto",
-          ],
-          [
-            "Ontem, 16:10",
-            "Prioridade do checkout alterada",
-            "Marina Costa",
-            "Alta → Crítica",
-          ],
-          [
-            "29 Ago, 10:24",
-            "Esforço do Portal revisado",
-            "Camila Souza",
-            "120h → 140h",
-          ],
-          [
-            "27 Ago, 09:05",
-            "Otimização de busca concluída",
-            "Bruno Alves",
-            "Entrega antecipada",
-          ],
-        ].map((x, i) => (
-          <div className="change">
-            <div className={"changeicon i" + i}>
-              {i === 0 ? (
-                <I.Plus />
-              ) : i === 1 ? (
-                <I.ArrowUp />
-              ) : i === 2 ? (
-                <I.Clock />
-              ) : (
-                <I.Check />
-              )}
-            </div>
-            <div>
-              <small>{x[0]}</small>
-              <b>{x[1]}</b>
-              <span>por {x[2]}</span>
-            </div>
-            <Badge tone={i === 0 ? "bad" : i === 3 ? "good" : "gray"}>
-              {x[3]}
-            </Badge>
-          </div>
-        ))}
-      </Card>
-    </>
-  );
-}
 const initiativeStatuses: InitiativeStatus[] = ["Não iniciada", "Em andamento", "Concluída", "Bloqueada"];
 const emptyInitiative: Omit<Initiative, "id"> = { name: "", status: "Não iniciada", startDate: "", endDate: "", owner: "", observation: "", progress: 0 };
 function Initiatives({readOnly=false}:{readOnly?:boolean}) {
@@ -3031,20 +2738,20 @@ function UsersAdmin({users,currentId,onChange}:{users:Account[];currentId:string
     catch {setError("Não foi possível salvar o usuário.")}
   }
   async function saveEdit(e:React.FormEvent){e.preventDefault();if(!editingUser)return;setEditError("");const normalizedEmail=editEmail.trim().toLowerCase();if(!editName.trim()){setEditError("Informe o nome do usuário.");return}if(!normalizedEmail){setEditError("Informe o e-mail do usuário.");return}if(users.some(user=>user.id!==editingUser.id&&user.email.toLowerCase()===normalizedEmail)){setEditError("Este e-mail já está cadastrado.");return}if(editPassword&&editPassword.length<8){setEditError("A nova senha deve ter pelo menos 8 caracteres.");return}if(editRole!=="Administrador"&&editProducts.length===0){setEditError("Selecione ao menos um produto ativo para o usuário.");return}try{const passwordAccount=editPassword?await makeAccount(editName,normalizedEmail,editPassword,editRole):null;onChange(users.map(user=>user.id===editingUser.id?{...user,name:editName.trim(),email:normalizedEmail,role:editRole,productIds:editRole==="Administrador"?allIds:editProducts,...(passwordAccount?{salt:passwordAccount.salt,passwordHash:passwordAccount.passwordHash,mustChangePassword:true}:{})}:user));closeEdit()}catch{setEditError("Não foi possível atualizar o usuário.")}}
-  function changeRole(user:Account,next:AccessRole){if(user.email===ADMIN_EMAIL || user.id===currentId && next!=="Administrador")return;onChange(users.map(item=>item.id===user.id?{...item,role:next,productIds:next==="Administrador"?allIds:item.productIds??allIds}:item))}
+  function changeRole(user:Account,next:AccessRole){if(user.id===currentId && next!=="Administrador")return;onChange(users.map(item=>item.id===user.id?{...item,role:next,productIds:next==="Administrador"?allIds:item.productIds??allIds}:item))}
   function changeProducts(user:Account,id:number){if(user.role==="Administrador")return;const next=toggle(user.productIds??allIds,id);onChange(users.map(item=>item.id===user.id?{...item,productIds:next}:item))}
-  function toggleActive(user:Account){if(user.id===currentId||user.email===ADMIN_EMAIL)return;onChange(users.map(item=>item.id===user.id?{...item,active:item.active===false}:item))}
+  function toggleActive(user:Account){if(user.id===currentId)return;onChange(users.map(item=>item.id===user.id?{...item,active:item.active===false}:item))}
   function approve(user:Account){if(user.role!=="Administrador"&&(user.productIds??[]).length===0)return;onChange(users.map(item=>item.id===user.id?{...item,approved:true,active:true}:item))}
-  function remove(user:Account){if(user.id===currentId||user.email===ADMIN_EMAIL)return;onChange(users.filter(item=>item.id!==user.id))}
+  function remove(user:Account){if(user.id===currentId)return;onChange(users.filter(item=>item.id!==user.id))}
   return <>
     <PageHead title="Administração de usuários" desc="Gerencie usuários, perfis e produtos permitidos." action={<button className="primary" onClick={openCreate}><I.UserPlus/> Novo usuário</button>}/>
     <Card><div className="tablewrap"><table><thead><tr><th>Usuário</th><th>E-mail</th><th>Senha</th><th>Perfil</th><th>Produtos permitidos</th><th>Status</th><th>Último acesso</th><th>Ações</th></tr></thead><tbody>{users.map(user=><tr key={user.id}>
       <td><span className="person">{user.name[0]}</span><b>{user.name}</b></td><td>{user.email}</td><td><span aria-label="Senha protegida">********</span></td>
-      <td><select className={`quarter-inline ${roleColor(user.role)}`} value={user.role} disabled={user.id===currentId||user.email===ADMIN_EMAIL} onChange={event=>changeRole(user,event.target.value as AccessRole)}><option>Administrador</option><option>Gestor</option><option>Visualização</option></select></td>
+      <td><select className={`quarter-inline ${roleColor(user.role)}`} value={user.role} disabled={user.id===currentId} onChange={event=>changeRole(user,event.target.value as AccessRole)}><option>Administrador</option><option>Gestor</option><option>Visualização</option></select></td>
       <td>{user.role==="Administrador"?"Todos os produtos":<div className="user-product-options compact">{activeProducts.map(product=><label key={product.id}><input type="checkbox" checked={(user.productIds??allIds).includes(product.id)} onChange={()=>changeProducts(user,product.id)}/>{product.name}</label>)}</div>}</td>
       <td><Badge tone={user.approved===false?"gray":user.active===false?"gray":"good"}>{user.approved===false?"Aguardando aprovação":user.active===false?"Bloqueado":"Ativo"}</Badge></td>
       <td>{user.lastAccessAt && Number.isFinite(Date.parse(user.lastAccessAt)) ? <time dateTime={user.lastAccessAt}>{new Date(user.lastAccessAt).toLocaleString("pt-BR")}</time> : "Sem registro"}</td>
-      <td><div className="row-actions">{user.approved===false&&<button className="edit" title={user.role!=="Administrador"&&(user.productIds??[]).length===0?"Selecione ao menos um produto para aprovar":"Aprovar acesso"} aria-label={`Aprovar acesso de ${user.name}`} disabled={user.role!=="Administrador"&&(user.productIds??[]).length===0} onClick={()=>approve(user)}><I.CircleCheck/></button>}<button className="edit" title="Editar usuário" aria-label={`Editar ${user.name}`} disabled={user.id===currentId||user.email===ADMIN_EMAIL} onClick={()=>openEdit(user)}><I.Pencil/></button><button title="Redefinir senha" aria-label={`Redefinir senha de ${user.name}`} disabled={user.id===currentId} onClick={()=>openReset(user)}><I.KeyRound/></button><button className={user.active===false?"user-activation is-blocked":"user-activation"} title={user.active===false?"Ativar usuário":"Bloquear usuário"} aria-label={user.active===false?`Ativar ${user.name}`:`Bloquear ${user.name}`} aria-pressed={user.active!==false} disabled={user.id===currentId||user.email===ADMIN_EMAIL||user.approved===false} onClick={()=>toggleActive(user)}>{user.active===false?<I.CirclePlay/>:<I.CirclePause/>}</button><button className="delete" title="Excluir usuário" aria-label={`Excluir ${user.name}`} disabled={user.id===currentId||user.email===ADMIN_EMAIL} onClick={()=>remove(user)}><I.Trash2/></button></div></td>
+      <td><div className="row-actions">{user.approved===false&&<button className="edit" title={user.role!=="Administrador"&&(user.productIds??[]).length===0?"Selecione ao menos um produto para aprovar":"Aprovar acesso"} aria-label={`Aprovar acesso de ${user.name}`} disabled={user.role!=="Administrador"&&(user.productIds??[]).length===0} onClick={()=>approve(user)}><I.CircleCheck/></button>}<button className="edit" title="Editar usuário" aria-label={`Editar ${user.name}`} disabled={user.id===currentId} onClick={()=>openEdit(user)}><I.Pencil/></button><button title="Redefinir senha" aria-label={`Redefinir senha de ${user.name}`} disabled={user.id===currentId} onClick={()=>openReset(user)}><I.KeyRound/></button><button className={user.active===false?"user-activation is-blocked":"user-activation"} title={user.active===false?"Ativar usuário":"Bloquear usuário"} aria-label={user.active===false?`Ativar ${user.name}`:`Bloquear ${user.name}`} aria-pressed={user.active!==false} disabled={user.id===currentId||user.approved===false} onClick={()=>toggleActive(user)}>{user.active===false?<I.CirclePlay/>:<I.CirclePause/>}</button><button className="delete" title="Excluir usuário" aria-label={`Excluir ${user.name}`} disabled={user.id===currentId} onClick={()=>remove(user)}><I.Trash2/></button></div></td>
     </tr>)}</tbody></table></div></Card>
     {createOpen&&<div className="overlay confirm-overlay" onMouseDown={closeCreate}><form className="staff-modal users-create-modal" autoComplete="off" onMouseDown={event=>event.stopPropagation()} onSubmit={add}>
       <div className="modal-head"><div><span className="modal-icon"><I.UserPlus/></span><div><h2>Novo usuário</h2><p>Cadastre o acesso e defina os produtos permitidos.</p></div></div><button type="button" className="modal-close" onClick={closeCreate}><I.X/></button></div>
@@ -3070,14 +2777,14 @@ function UsersAdmin({users,currentId,onChange}:{users:Account[];currentId:string
     </form></div>}
   </>;
 }
-function Login({hasAccounts,onLogin,onRegister}:{hasAccounts:boolean;onLogin:(account:Account,remember:boolean,accounts?:Account[])=>void;onRegister:(accounts:Account[])=>void}) {
+function Login({hasAccounts,onLogin,onRegister}:{hasAccounts:boolean;onLogin:(account:Account,remember:boolean,accounts?:Account[])=>Promise<void>;onRegister:(accounts:Account[])=>void}) {
   const [name,setName]=useState("");const [email,setEmail]=useState("");const [password,setPassword]=useState("");const [newPassword,setNewPassword]=useState("");const [confirmPassword,setConfirmPassword]=useState("");const [pendingAccount,setPendingAccount]=useState<Account|null>(null);const [registering,setRegistering]=useState(false);const [remember,setRemember]=useState(false);const [error,setError]=useState("");const [notice,setNotice]=useState("");const [busy,setBusy]=useState(false);
   function switchMode(next:boolean){setRegistering(next);setName("");setEmail("");setPassword("");setError("");setNotice("")}
   async function submit(e:React.FormEvent){e.preventDefault();setBusy(true);setError("");setNotice("");try {
-    if(pendingAccount){if(newPassword.length<8){setError("A nova senha deve ter pelo menos 8 caracteres.");return}if(newPassword!==confirmPassword){setError("As senhas não coincidem.");return}const updated=await updateAccountPassword(pendingAccount,newPassword,false);const next=loadAccounts().map(user=>user.id===updated.id?updated:user);onLogin(updated,remember,next);return}
-    if(registering){const existing=loadAccounts();const normalized=email.trim().toLowerCase();if(!name.trim()){setError("Informe seu nome.");return}if(password.length<8){setError("A senha deve ter pelo menos 8 caracteres.");return}if(existing.some(user=>user.email.trim().toLowerCase()===normalized)){setError("Este e-mail já possui cadastro. Se estiver aguardando aprovação, fale com o administrador.");return}const account=await makeAccount(name,normalized,password,"Visualização");const next=[...existing,{...account,active:false,approved:false,productIds:[]}];const synced=await saveAccounts(next);if(!synced){localStorage.setItem("roadmap.accounts.v1",JSON.stringify(existing));setError("Não foi possível enviar seu cadastro. Confira sua conexão e tente novamente.");return}onRegister(next);setNotice("Cadastro enviado. O administrador precisa aprovar seu acesso antes do primeiro login.");setName("");setEmail("");setPassword("");setRegistering(false);return}
-    if(!hasAccounts){if(password.length<8){setError("Use uma senha com pelo menos 8 caracteres.");return}const account=await makeAccount(name,email,password,"Administrador");onLogin(account,remember,[account]);return}
-    const account=loadAccounts().find(user=>user.email===email.trim().toLowerCase());if(!account || await hashPassword(password,account.salt)!==account.passwordHash){setError("E-mail ou senha inválidos.");return}if(account.approved===false){setError("Seu cadastro aguarda aprovação do administrador.");return}if(account.active===false){setError("Esta conta está bloqueada. Fale com um administrador.");return}if(account.mustChangePassword){setPendingAccount(account);setPassword("");return}onLogin(account,remember)
+    if(pendingAccount){if(newPassword.length<8){setError("A nova senha deve ter pelo menos 8 caracteres.");return}if(newPassword!==confirmPassword){setError("As senhas não coincidem.");return}const updated=await updateAccountPassword(pendingAccount,newPassword,false);const next=loadAccounts().map(user=>user.id===updated.id?updated:user);await onLogin(updated,remember,next);return}
+    if(registering){const existing=loadAccounts();const normalized=email.trim().toLowerCase();if(!name.trim()){setError("Informe seu nome.");return}if(password.length<8){setError("A senha deve ter pelo menos 8 caracteres.");return}if(existing.some(user=>user.email.trim().toLowerCase()===normalized)){setError("Este e-mail já possui cadastro. Se estiver aguardando aprovação, fale com o administrador.");return}const account=await makeAccount(name,normalized,password,"Visualização");const next=[...existing,{...account,active:false,approved:false,productIds:[]}];const synced=await saveAccounts(next);if(!synced){setError("Não foi possível enviar seu cadastro. Confira sua conexão e tente novamente.");return}onRegister(next);setNotice("Cadastro enviado. O administrador precisa aprovar seu acesso antes do primeiro login.");setName("");setEmail("");setPassword("");setRegistering(false);return}
+    if(!hasAccounts){if(password.length<8){setError("Use uma senha com pelo menos 8 caracteres.");return}const account=await makeAccount(name,email,password,"Administrador");const saved=await saveAccounts([account]);if(!saved){setError("N?o foi poss?vel criar o administrador no banco. Confira a conex?o e tente novamente.");return}onRegister([account]);await onLogin(account,remember,[account]);return}
+    const account=loadAccounts().find(user=>user.email===email.trim().toLowerCase());if(!account || await hashPassword(password,account.salt)!==account.passwordHash){setError("E-mail ou senha inválidos.");return}if(account.approved===false){setError("Seu cadastro aguarda aprovação do administrador.");return}if(account.active===false){setError("Esta conta está bloqueada. Fale com um administrador.");return}if(account.mustChangePassword){setPendingAccount(account);setPassword("");return}await onLogin(account,remember)
   }catch{setError("Não foi possível autenticar. Verifique sua conexão e tente novamente.")}finally{setBusy(false)}}
   return <div className="login-screen"><form className="login-card" autoComplete="off" onSubmit={submit}><div className="login-mark"><I.Waypoints/></div><h1>{pendingAccount?"Troque sua senha":registering?"Criar usuário":hasAccounts?"Entrar no nddPlan Work":"Criar administrador"}</h1><p>{pendingAccount?"Por segurança, escolha uma nova senha para continuar.":registering?"Crie seu cadastro. O acesso será liberado após aprovação do administrador.":hasAccounts?"Acesse com seu e-mail e senha.":"Configure o primeiro acesso deste navegador."}</p>{pendingAccount?<><label>Nova senha<input required type="password" autoComplete="new-password" minLength={8} value={newPassword} onChange={event=>setNewPassword(event.target.value)}/></label><label>Confirme a nova senha<input required type="password" autoComplete="new-password" minLength={8} value={confirmPassword} onChange={event=>setConfirmPassword(event.target.value)}/></label><label className="remember-login"><input type="checkbox" checked={remember} onChange={event=>setRemember(event.target.checked)}/><span>Manter conectado neste navegador</span></label></>:<>{(!hasAccounts||registering)&&<label>Nome<input required autoComplete="name" value={name} onChange={event=>setName(event.target.value)}/></label>}<label>E-mail<input required type="email" autoComplete={registering?"email":"username"} value={email} onChange={event=>setEmail(event.target.value)}/></label><label>Senha<input required type="password" minLength={registering||!hasAccounts?8:1} autoComplete={registering||!hasAccounts?"new-password":"current-password"} value={password} onChange={event=>setPassword(event.target.value)}/></label>{!registering&&<label className="remember-login"><input type="checkbox" checked={remember} onChange={event=>setRemember(event.target.checked)}/><span>Manter conectado neste navegador</span></label>}</>}{error&&<p className="auth-error" role="alert">{error}</p>}{notice&&<p className="auth-success" role="status">{notice}</p>}<button className="primary" disabled={busy} type="submit">{busy?"Aguarde...":pendingAccount?"Salvar nova senha":registering?"Enviar cadastro":hasAccounts?"Entrar":"Criar conta e entrar"}</button>{hasAccounts&&!pendingAccount&&<button className="ghost" type="button" onClick={()=>switchMode(!registering)}>{registering?"Já tenho cadastro":"Criar novo usuário"}</button>}<small>Os cadastros e dados do portal são armazenados no banco do portal.</small></form></div>
 }
@@ -3092,8 +2799,8 @@ function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [cmd, setCmd] = useState(false);
   const role=activeUser?.role ?? "Visualização";
-  function updateAccounts(next:Account[]){saveAccounts(next);setAccounts(next)}
-  function login(account:Account,remember:boolean,next?:Account[]){const lastAccessAt=new Date().toISOString();updateAccounts((next??loadAccounts()).map(user=>user.id===account.id?{...user,lastAccessAt}:user));setSession(account.id,remember);setActiveId(account.id)}
+  async function updateAccounts(next:Account[]){if(await saveAccounts(next))setAccounts(next);else window.dispatchEvent(new CustomEvent("portal-database-error"))}
+  async function login(account:Account,remember:boolean,next?:Account[]){const lastAccessAt=new Date().toISOString();const updated=(next??loadAccounts()).map(user=>user.id===account.id?{...user,lastAccessAt}:user);if(!await saveAccounts(updated))throw new Error("Falha ao salvar acesso no Supabase.");setAccounts(updated);setSession(account.id,remember);setActiveId(account.id)}
   function logout(){setSession(null);setActiveId(null);setCmd(false)}
   const allowedNav=nav.filter(([name])=>role==="Administrador"?true:role==="Gestor"?["Visão geral","Demandas","Roadmap","Iniciativas","Baseline","Produtos","Capacidade","Analytics"].includes(name):["Demandas","Roadmap","Iniciativas","Baseline","Capacidade","Analytics"].includes(name));
   const mainNav=allowedNav.filter(([name])=>mainNavPages.includes(name));
@@ -3112,7 +2819,8 @@ function App() {
   if(!activeUser||activeUser.active===false)return <Login hasAccounts={accounts.length>0} onLogin={login} onRegister={setAccounts}/>;
   return (
     <ProductAccessContext.Provider value={role === "Administrador" ? null : new Set(activeUser.productIds ?? productCatalog?.products.map(product => product.id) ?? [])}>
-    <div className={`${dark ? "app dark" : "app"} ${role === "Visualização" ? "role-viewer" : role === "Gestor" ? "role-manager" : "role-admin"}`}>
+      <CurrentAccountContext.Provider value={activeUser}>
+      <div className={`${dark ? "app dark" : "app"} ${role === "Visualização" ? "role-viewer" : role === "Gestor" ? "role-manager" : "role-admin"}`}>
       <aside className={collapsed ? "collapsed" : ""}>
         <div className="brand">
           <span role="button" tabIndex={0} aria-label="Expandir menu" title="Expandir menu" onClick={() => setCollapsed(false)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setCollapsed(false); } }}>
@@ -3217,6 +2925,7 @@ function App() {
         </div>
       )}
     </div>
+      </CurrentAccountContext.Provider>
     </ProductAccessContext.Provider>
   );
 }

@@ -10,16 +10,12 @@ sheet.columns = [
   { header: "Capacidade total", key: "total", width: 20 },
   { header: "Horas alocadas", key: "used", width: 20 },
 ];
-sheet.addRows([
-  { name: "Ana Oliveira", role: "Desenvolvedor", product: "Commerce", total: 130, used: 40 },
-  { name: "Carlos Lima", role: "Tester", product: "Payments", total: 120, used: 24 },
-]);
 const header = sheet.getRow(1);
 header.height = 28;
 header.font = { bold: true, color: { argb: "FFFFFFFF" } };
 header.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF246BFD" } };
 header.alignment = { vertical: "middle", horizontal: "center" };
-sheet.autoFilter = { from: "A1", to: "E3" };
+sheet.autoFilter = { from: "A1", to: "E1" };
 
 const instructions = workbook.addWorksheet("Instruções");
 instructions.columns = [{ header: "Campo", width: 24 }, { header: "Obrigatório", width: 15 }, { header: "Orientação", width: 75 }];

@@ -9,24 +9,48 @@ const portalStateKeys = [
 ] as const;
 
 export type PortalStateKey = (typeof portalStateKeys)[number];
+const pendingStateSaves = new Map<string, Promise<boolean>>();
+const portalStateCache = new Map<string, unknown>();
+let portalAccountsCache: unknown[] = [];
+
+export function readPortalState<T>(key: string, fallback: T): T {
+  return portalStateCache.has(key) ? portalStateCache.get(key) as T : fallback;
+}
+
+export function readPortalAccounts(): unknown[] {
+  return portalAccountsCache;
+}
 
 function reportDatabaseError() {
   window.dispatchEvent(new CustomEvent("portal-database-error"));
 }
 
-export async function savePortalState(key: string, value: unknown) {
-  if (!portalStateKeys.includes(key as PortalStateKey)) return;
-  try {
-    const response = await fetch("/api/state", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ key, value }),
-    });
-    if (!response.ok) throw new Error(`/api/state respondeu HTTP ${response.status}.`);
-  } catch (error) {
-    console.error("Falha ao sincronizar o estado:", error);
-    reportDatabaseError();
-  }
+export function savePortalState(key: string, value: unknown): Promise<boolean> {
+  if (!portalStateKeys.includes(key as PortalStateKey)) return Promise.resolve(false);
+
+  const previous = pendingStateSaves.get(key) ?? Promise.resolve(true);
+  const current = previous.then(async () => {
+    try {
+      const response = await fetch("/api/state", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key, value }),
+      });
+      if (!response.ok) throw new Error(`/api/state respondeu HTTP ${response.status}.`);
+      portalStateCache.set(key, value);
+      return true;
+    } catch (error) {
+      console.error("Falha ao sincronizar o estado:", error);
+      reportDatabaseError();
+      return false;
+    }
+  });
+
+  pendingStateSaves.set(key, current);
+  void current.then(() => {
+    if (pendingStateSaves.get(key) === current) pendingStateSaves.delete(key);
+  });
+  return current;
 }
 
 export async function savePortalAccounts(accounts: unknown[]): Promise<boolean> {
@@ -37,6 +61,7 @@ export async function savePortalAccounts(accounts: unknown[]): Promise<boolean> 
       body: JSON.stringify(accounts),
     });
     if (!response.ok) throw new Error(`/api/accounts respondeu HTTP ${response.status}.`);
+    portalAccountsCache = accounts;
     return true;
   } catch (error) {
     console.error("Falha ao sincronizar usuários:", error);
@@ -61,68 +86,42 @@ function accountFromDatabaseRow(row: Record<string, unknown>) {
   };
 }
 
-function storedAccounts(): unknown[] {
-  try {
-    const accounts = JSON.parse(localStorage.getItem("roadmap.accounts.v1") || "[]");
-    return Array.isArray(accounts) ? accounts : [];
-  } catch {
-    return [];
-  }
-}
-
-async function initializePortalAccounts(legacyRows: Array<{ key: string; value: unknown }>) {
+async function initializePortalAccounts() {
   const response = await fetch("/api/accounts");
-  if (!response.ok) throw new Error(`/api/accounts respondeu HTTP ${response.status}.`);
-
+  if (!response.ok) throw new Error("/api/accounts returned HTTP " + response.status + ".");
   const { rows } = await response.json() as { rows: Array<Record<string, unknown>> };
-  if (rows.length) {
-    localStorage.setItem("roadmap.accounts.v1", JSON.stringify(rows.map(accountFromDatabaseRow)));
-    return;
-  }
-
-  const legacyAccounts = legacyRows.find(row => row.key === "roadmap.accounts.v1")?.value;
-  const legacy = Array.isArray(legacyAccounts) ? legacyAccounts : [];
-  const local = storedAccounts();
-  const mergedById = new Map<string, Record<string, unknown>>();
-  for (const account of [...legacy, ...local]) {
-    if (account && typeof account === "object" && typeof (account as Record<string, unknown>).id === "string") {
-      mergedById.set((account as Record<string, unknown>).id as string, account as Record<string, unknown>);
-    }
-  }
-  const accounts = [...mergedById.values()];
-  if (accounts.length) {
-    localStorage.setItem("roadmap.accounts.v1", JSON.stringify(accounts));
-    await savePortalAccounts(accounts);
-  }
+  portalAccountsCache = rows.map(accountFromDatabaseRow);
 }
 
 export async function initializePortalDatabase() {
   const response = await fetch("/api/state");
-  if (!response.ok) throw new Error(`/api/state respondeu HTTP ${response.status}.`);
+  if (!response.ok) throw new Error("/api/state returned HTTP " + response.status + ".");
 
   const { rows } = await response.json() as { rows: Array<{ key: string; value: unknown }> };
-  const stateRows = rows.filter(row => portalStateKeys.includes(row.key as PortalStateKey));
-  for (const row of stateRows) localStorage.setItem(row.key, JSON.stringify(row.value));
+  const stateByKey = new Map(rows
+    .filter(row => portalStateKeys.includes(row.key as PortalStateKey))
+    .map(row => [row.key, row.value]));
+  const missingRows = portalStateKeys
+    .filter(key => !stateByKey.has(key))
+    .map(key => ({ key, value: [] }));
 
-  if (!stateRows.length) {
-    const localRows = portalStateKeys.flatMap(key => {
-      const saved = localStorage.getItem(key);
-      if (saved === null) return [];
-      try {
-        return [{ key, value: JSON.parse(saved) }];
-      } catch {
-        return [{ key, value: saved }];
-      }
+  if (missingRows.length) {
+    const seedResponse = await fetch("/api/state", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(missingRows),
     });
-    if (localRows.length) {
-      const seedResponse = await fetch("/api/state", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(localRows),
-      });
-      if (!seedResponse.ok) throw new Error("Não foi possível migrar os dados locais.");
-    }
+    if (!seedResponse.ok) throw new Error("Could not initialize empty database collections.");
   }
 
-  await initializePortalAccounts(rows);
+  for (const key of portalStateKeys) {
+    portalStateCache.set(key, stateByKey.get(key) ?? []);
+  }
+
+  await initializePortalAccounts();
+  try {
+    for (const key of [...portalStateKeys, "roadmap.accounts.v1"]) localStorage.removeItem(key);
+  } catch {
+    // O cache legado nao participa da leitura nem da gravacao dos dados.
+  }
 }
