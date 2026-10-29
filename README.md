@@ -17,6 +17,12 @@ Para gerar a versão de produção:
 npm run build
 ```
 
+## Publicação na Vercel
+
+O projeto inclui a função `api/state.mjs`, usada pelo portal publicado para ler e salvar o estado no Supabase. No projeto da Vercel, configure as variáveis `SUPABASE_URL` e `SUPABASE_SECRET_KEY` em **Settings → Environment Variables** (Production e também Preview, se usar previews) e faça um novo deploy. Use os valores do projeto Supabase; não coloque a chave secreta em variáveis `VITE_*` nem no código do navegador.
+
+No Supabase, aplique `scripts/supabase-schema.sql` pelo SQL Editor. Se a configuração estiver correta e a tabela existir, a inicialização carrega o estado salvo no banco; se o banco ainda estiver vazio, ela migra os dados encontrados neste navegador.
+
 ## Principais recursos
 
 - Dashboard executivo com KPIs, gráficos e insights
