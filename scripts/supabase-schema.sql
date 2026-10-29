@@ -15,6 +15,21 @@ create table if not exists public.portal_state (
   updated_at timestamptz not null default now()
 );
 
+-- Refresh this constraint when portal_state was created by an older schema.
+alter table public.portal_state drop constraint if exists portal_state_key_check;
+alter table public.portal_state add constraint portal_state_key_check check (
+  key in (
+    'dev-plan:products',
+    'dev-plan:demands',
+    'dev-plan:roadmap',
+    'dev-plan:history',
+    'dev-plan:roadmap-versions',
+    'dev-plan:team',
+    'dev-plan:initiatives',
+    'roadmap.accounts.v1'
+  )
+);
+
 alter table public.portal_state enable row level security;
 grant all on table public.portal_state to service_role;
 

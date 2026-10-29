@@ -2224,7 +2224,7 @@ function Capacity() {
   const { team, setTeam } = useTeam();
   const { products } = useProducts();
   const { rows, setRows, roadmap, setRoadmap } = useDemands();
-  const [productFilter,setProductFilter]=useState("Todos");
+  const cargoName=products.find(product=>product.code.trim().toUpperCase()==="CARGO"||product.name.trim().toLowerCase()==="nddcargo")?.name??"nddCargo";
   const [allocationFor,setAllocationFor]=useState<Staff|null>(null);
   const [form, setForm] = useState(emptyStaff);
   const [editing, setEditing] = useState<Staff | null>(null);
@@ -2259,7 +2259,7 @@ function Capacity() {
   const allocatedDemandHours = (person: Staff) =>
     demandAllocations(person).reduce((sum, item) => sum + item.hours, 0);
   const effectiveUsed = (person: Staff) => allocatedDemandHours(person);
-  const filteredTeam=[...(productFilter==="Todos"?team:team.filter((person)=>person.product===productFilter))].sort((a,b)=>Number(b.active!==false)-Number(a.active!==false)||a.name.localeCompare(b.name,"pt-BR"));
+  const filteredTeam=[...team.filter(person=>person.product.trim().toLowerCase()===cargoName.trim().toLowerCase())].sort((a,b)=>Number(b.active!==false)-Number(a.active!==false)||a.name.localeCompare(b.name,"pt-BR"));
   const activeTeam=filteredTeam.filter(person=>person.active!==false);
   const total = activeTeam.reduce((sum, m) => sum + m.total, 0);
   const used = activeTeam.reduce((sum, m) => sum + effectiveUsed(m), 0);
@@ -2267,10 +2267,10 @@ function Capacity() {
   const overloaded = activeTeam.filter((m) => effectiveUsed(m) / m.total > 0.9).length;
   const toggleStaff=(staff:Staff)=>setTeam(current=>current.map(person=>person.id===staff.id?{...person,active:person.active===false}:person));
   const allocatedDemands=allocationFor?demandAllocations(allocationFor):[];
-  const importCapacity=async(e:React.ChangeEvent<HTMLInputElement>)=>{const file=e.target.files?.[0];if(!file)return;setImporting(true);setImportFeedback("");try{const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await file.arrayBuffer());const sheet=workbook.worksheets[0];if(!sheet)throw new Error();const headers:Record<number,string>={};sheet.getRow(1).eachCell((cell,col)=>headers[col]=cell.text.trim().toLowerCase());const get=(row:ExcelJS.Row,names:string[])=>{const col=Object.entries(headers).find(([,header])=>names.includes(header))?.[0];return col?row.getCell(Number(col)).text.trim():""};const incoming:Staff[]=[];let ignored=0;sheet.eachRow((row,index)=>{if(index===1)return;const name=get(row,["colaborador","nome","nome completo"]);const productText=get(row,["produto"]);const product=products.find((item)=>item.name.toLowerCase()===productText.toLowerCase()&&item.active);const total=Number(get(row,["capacidade","capacidade total","horas disponíveis","horas disponiveis"]).replace(",","."));if(!name||!product||!total){ignored++;return}incoming.push({id:Date.now()+index,name,role:normalizeStaffRole(get(row,["função","funcao","cargo"])||"Desenvolvedor"),product:product.name,total,used:Number(get(row,["horas alocadas","alocada","alocação","alocacao"]).replace(",","."))||0})});setTeam((current)=>{const next=[...current];incoming.forEach((person)=>{const found=next.findIndex((item)=>item.name.toLowerCase()===person.name.toLowerCase());if(found>=0)next[found]={...person,id:next[found].id,active:next[found].active};else next.push(person)});return next});setImportFeedback(`${incoming.length} capacidade(s) importada(s)${ignored?` · ${ignored} linha(s) ignorada(s)`:""}.`)}catch{setImportFeedback("Não foi possível ler a planilha de capacidade.")}finally{setImporting(false);e.target.value=""}};
+  const importCapacity=async(e:React.ChangeEvent<HTMLInputElement>)=>{const file=e.target.files?.[0];if(!file)return;setImporting(true);setImportFeedback("");try{const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await file.arrayBuffer());const sheet=workbook.worksheets[0];if(!sheet)throw new Error();const headers:Record<number,string>={};sheet.getRow(1).eachCell((cell,col)=>headers[col]=cell.text.trim().toLowerCase());const get=(row:ExcelJS.Row,names:string[])=>{const col=Object.entries(headers).find(([,header])=>names.includes(header))?.[0];return col?row.getCell(Number(col)).text.trim():""};const incoming:Staff[]=[];let ignored=0;sheet.eachRow((row,index)=>{if(index===1)return;const name=get(row,["colaborador","nome","nome completo"]);const productText=get(row,["produto"]);const product=products.find((item)=>item.name.toLowerCase()===productText.toLowerCase()&&item.name.toLowerCase()===cargoName.toLowerCase()&&item.active);const total=Number(get(row,["capacidade","capacidade total","horas disponíveis","horas disponiveis"]).replace(",","."));if(!name||!product||!total){ignored++;return}incoming.push({id:Date.now()+index,name,role:normalizeStaffRole(get(row,["função","funcao","cargo"])||"Desenvolvedor"),product:product.name,total,used:Number(get(row,["horas alocadas","alocada","alocação","alocacao"]).replace(",","."))||0})});setTeam((current)=>{const next=[...current];incoming.forEach((person)=>{const found=next.findIndex((item)=>item.name.toLowerCase()===person.name.toLowerCase()&&item.product.trim().toLowerCase()===cargoName.trim().toLowerCase());if(found>=0)next[found]={...person,id:next[found].id,active:next[found].active};else next.push(person)});return next});setImportFeedback(`${incoming.length} capacidade(s) do nddCargo importada(s)${ignored?` · ${ignored} linha(s) ignorada(s)`:""}.`)}catch{setImportFeedback("Não foi possível ler a planilha de capacidade.")}finally{setImporting(false);e.target.value=""}};
   const openNew = () => {
     setEditing(null);
-    setForm(emptyStaff);
+    setForm({...emptyStaff,product:cargoName});
     setError("");
     setModal(true);
   };
@@ -2299,8 +2299,8 @@ function Capacity() {
       setError("Informe o nome do colaborador.");
       return;
     }
-    if (!form.product) {
-      setError("Selecione o produto do colaborador.");
+    if (form.product.trim().toLowerCase()!==cargoName.trim().toLowerCase()) {
+      setError("A visão de capacidade está restrita aos colaboradores do nddCargo.");
       return;
     }
     if (cap <= 0 || allocation < 0) {
@@ -2311,7 +2311,7 @@ function Capacity() {
       id: editing?.id || Date.now(),
       name: form.name.trim(),
       role: form.role,
-      product: form.product,
+      product: cargoName,
       total: cap,
       used: allocation,
       active: editing?.active,
@@ -2346,7 +2346,7 @@ function Capacity() {
         action={<div className="capacity-actions"><button className="ghost" onClick={()=>fileRef.current?.click()} disabled={importing}>{importing?<I.LoaderCircle className="spin"/>:<I.FileSpreadsheet/>}{importing?"Importando...":"Importar Excel"}</button><input ref={fileRef} type="file" accept=".xlsx,.xls" hidden onChange={importCapacity}/><button className="primary" onClick={openNew}><I.UserPlus /> Novo colaborador</button></div>}
       />
       {importFeedback&&<div className="import-feedback"><I.CircleCheck/><span>{importFeedback}</span><button onClick={()=>setImportFeedback("")}><I.X/></button></div>}
-      <div className="capacity-filter"><div><I.Boxes/><span><b>Capacidade por produto</b><small>Filtre os indicadores e colaboradores</small></span></div><select value={productFilter} onChange={(e)=>setProductFilter(e.target.value)}><option>Todos</option>{products.filter(product=>product.active).map(product=><option key={product.id} value={product.name}>{product.name}</option>)}</select></div>
+      <div className="capacity-filter"><div><I.Boxes/><span><b>Capacidade do nddCargo</b><small>Exibindo apenas colaboradores vinculados a este produto</small></span></div><Badge tone="gray">{cargoName}</Badge></div>
       <div className="kpis compact">
         <Card>
           <span>Capacidade total</span>
@@ -2516,21 +2516,7 @@ function Capacity() {
                 <label>
                   Produto <em>*</em>
                 </label>
-                <select
-                  value={form.product}
-                  onChange={(e) =>
-                    setForm({ ...form, product: e.target.value })
-                  }
-                >
-                  <option value="">Selecione um produto...</option>
-                  {products
-                    .filter((product) => product.active)
-                    .map((product) => (
-                      <option key={product.id} value={product.name}>
-                        {product.name}
-                      </option>
-                    ))}
-                </select>
+                <input value={cargoName} readOnly aria-label="Produto do colaborador" />
               </div>
               <div className="form-field">
                 <label>Capacidade trimestral (horas)</label>
