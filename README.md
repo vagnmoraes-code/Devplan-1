@@ -19,7 +19,7 @@ npm run build
 
 ## Publicação na Vercel
 
-O projeto inclui a função `api/state.mjs`, usada pelo portal publicado para ler e salvar o estado no Supabase. No projeto da Vercel, configure as variáveis `SUPABASE_URL` e `SUPABASE_SECRET_KEY` em **Settings → Environment Variables** (Production e também Preview, se usar previews) e faça um novo deploy. Use os valores do projeto Supabase; não coloque a chave secreta em variáveis `VITE_*` nem no código do navegador.
+O projeto inclui as funções `api/state.mjs` e `api/accounts.mjs`, usadas pelo portal publicado para ler e salvar o estado e as contas no Supabase. No projeto da Vercel, configure as variáveis `SUPABASE_URL` e `SUPABASE_SECRET_KEY` em **Settings → Environment Variables** (Production e também Preview, se usar previews) e faça um novo deploy. Use os valores do projeto Supabase; não coloque a chave secreta em variáveis `VITE_*` nem no código do navegador.
 
 No Supabase, aplique `scripts/supabase-schema.sql` pelo SQL Editor. O script cria/atualiza `portal_state` e `portal_accounts` e migra as contas legadas de `portal_state` para a tabela dedicada. Reaplique o script após atualizar o portal para habilitar a gravação dos usuários em `portal_accounts`.
 

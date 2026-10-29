@@ -22,8 +22,9 @@ export async function savePortalState(key: string, value: unknown) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ key, value }),
     });
-    if (!response.ok) throw new Error("A API não confirmou a gravação.");
-  } catch {
+    if (!response.ok) throw new Error(`/api/state respondeu HTTP ${response.status}.`);
+  } catch (error) {
+    console.error("Falha ao sincronizar o estado:", error);
     reportDatabaseError();
   }
 }
@@ -35,8 +36,9 @@ export async function savePortalAccounts(accounts: unknown[]) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(accounts),
     });
-    if (!response.ok) throw new Error("A API não confirmou a gravação dos usuários.");
-  } catch {
+    if (!response.ok) throw new Error(`/api/accounts respondeu HTTP ${response.status}.`);
+  } catch (error) {
+    console.error("Falha ao sincronizar usuários:", error);
     reportDatabaseError();
   }
 }
@@ -67,7 +69,7 @@ function storedAccounts(): unknown[] {
 
 async function initializePortalAccounts(legacyRows: Array<{ key: string; value: unknown }>) {
   const response = await fetch("/api/accounts");
-  if (!response.ok) throw new Error("Não foi possível carregar os usuários do banco.");
+  if (!response.ok) throw new Error(`/api/accounts respondeu HTTP ${response.status}.`);
 
   const { rows } = await response.json() as { rows: Array<Record<string, unknown>> };
   if (rows.length) {
@@ -93,7 +95,7 @@ async function initializePortalAccounts(legacyRows: Array<{ key: string; value: 
 
 export async function initializePortalDatabase() {
   const response = await fetch("/api/state");
-  if (!response.ok) throw new Error("Banco indisponível ou tabela ainda não criada.");
+  if (!response.ok) throw new Error(`/api/state respondeu HTTP ${response.status}.`);
 
   const { rows } = await response.json() as { rows: Array<{ key: string; value: unknown }> };
   const stateRows = rows.filter(row => portalStateKeys.includes(row.key as PortalStateKey));
