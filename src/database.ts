@@ -29,7 +29,7 @@ export async function savePortalState(key: string, value: unknown) {
   }
 }
 
-export async function savePortalAccounts(accounts: unknown[]) {
+export async function savePortalAccounts(accounts: unknown[]): Promise<boolean> {
   try {
     const response = await fetch("/api/accounts", {
       method: "POST",
@@ -37,9 +37,11 @@ export async function savePortalAccounts(accounts: unknown[]) {
       body: JSON.stringify(accounts),
     });
     if (!response.ok) throw new Error(`/api/accounts respondeu HTTP ${response.status}.`);
+    return true;
   } catch (error) {
     console.error("Falha ao sincronizar usuários:", error);
     reportDatabaseError();
+    return false;
   }
 }
 
@@ -52,6 +54,7 @@ function accountFromDatabaseRow(row: Record<string, unknown>) {
     salt: String(row.salt ?? ""),
     passwordHash: String(row.password_hash ?? ""),
     ...(typeof row.active === "boolean" ? { active: row.active } : {}),
+    ...(typeof row.approved === "boolean" ? { approved: row.approved } : {}),
     ...(typeof row.last_access_at === "string" ? { lastAccessAt: row.last_access_at } : {}),
     ...(typeof row.must_change_password === "boolean" ? { mustChangePassword: row.must_change_password } : {}),
     ...(Array.isArray(row.product_ids) ? { productIds: row.product_ids.filter(Number.isInteger) as number[] } : {}),

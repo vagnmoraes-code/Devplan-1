@@ -49,3 +49,6 @@
 .sidefoot .workspace{min-width:0}.sidefoot .workspace>div{flex:1}.sidefoot .logout-button{width:30px;height:30px;flex:0 0 30px;margin-left:auto;display:grid;place-items:center;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--muted);cursor:pointer}.sidefoot .logout-button:hover{color:#7052f5;border-color:#7052f5}.sidefoot .logout-button svg{width:15px;height:15px}.collapsed .sidefoot .workspace{flex-wrap:wrap;justify-content:center;gap:8px}.collapsed .sidefoot .workspace>div{display:none}.collapsed .sidefoot .workspace .logout-button{margin:0}
 
 .workspace-email{max-width:155px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px!important;opacity:.85}.collapsed .workspace-email{display:none}
+
+.login-card .ghost{justify-content:center;min-height:40px}
+.auth-success{color:#067647!important;font-size:12px!important}

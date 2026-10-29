@@ -24,6 +24,7 @@ create table if not exists public.portal_accounts (
   email text not null,
   role text not null,
   active boolean default true,
+  approved boolean not null default true,
   last_access_at text,
   must_change_password boolean default false,
   product_ids jsonb not null default '[]'::jsonb,
@@ -35,6 +36,7 @@ alter table public.portal_accounts add column if not exists name text;
 alter table public.portal_accounts add column if not exists email text;
 alter table public.portal_accounts add column if not exists role text;
 alter table public.portal_accounts add column if not exists active boolean default true;
+alter table public.portal_accounts add column if not exists approved boolean not null default true;
 alter table public.portal_accounts add column if not exists last_access_at text;
 alter table public.portal_accounts add column if not exists must_change_password boolean default false;
 alter table public.portal_accounts add column if not exists product_ids jsonb not null default '[]'::jsonb;
@@ -46,7 +48,7 @@ grant all on table public.portal_accounts to service_role;
 
 -- Move accounts saved by older portal versions into the dedicated accounts table.
 insert into public.portal_accounts (
-  id, name, email, role, active, last_access_at,
+  id, name, email, role, active, approved, last_access_at,
   must_change_password, product_ids, salt, password_hash
 )
 select
@@ -55,6 +57,7 @@ select
   mapped.email,
   mapped.role,
   mapped.active,
+  mapped.approved,
   mapped.last_access_at,
   mapped.must_change_password,
   mapped.product_ids,
@@ -70,6 +73,7 @@ cross join lateral jsonb_populate_record(
     'email', account.value->>'email',
     'role', case account.value->>'role' when 'Editor' then 'Gestor' else account.value->>'role' end,
     'active', account.value->'active',
+    'approved', coalesce(account.value->'approved', 'true'::jsonb),
     'last_access_at', account.value->'lastAccessAt',
     'must_change_password', account.value->'mustChangePassword',
     'product_ids', coalesce(account.value->'productIds', '[]'::jsonb),
@@ -87,6 +91,7 @@ on conflict (id) do update set
   email = excluded.email,
   role = excluded.role,
   active = excluded.active,
+  approved = excluded.approved,
   last_access_at = excluded.last_access_at,
   must_change_password = excluded.must_change_password,
   product_ids = excluded.product_ids,

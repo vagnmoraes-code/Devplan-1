@@ -9,6 +9,7 @@ export function isValidAccountList(accounts) {
     typeof account.name === "string" &&
     typeof account.email === "string" &&
     ACCOUNT_ROLES.has(account.role) &&
+    (account.approved === undefined || typeof account.approved === "boolean") &&
     typeof account.salt === "string" &&
     typeof account.passwordHash === "string" &&
     (account.productIds === undefined || (Array.isArray(account.productIds) && account.productIds.every(Number.isInteger)))
@@ -22,6 +23,7 @@ function toRow(account) {
     email: account.email,
     role: account.role,
     active: account.active ?? true,
+    approved: account.approved ?? true,
     last_access_at: account.lastAccessAt ?? null,
     must_change_password: account.mustChangePassword ?? false,
     product_ids: account.productIds ?? [],
@@ -31,7 +33,7 @@ function toRow(account) {
 }
 
 export async function loadAccountRows(url, key) {
-  return fetch(`${url}/rest/v1/${TABLE}?select=id,name,email,role,active,last_access_at,must_change_password,product_ids,salt,password_hash&order=id.asc`, {
+  return fetch(`${url}/rest/v1/${TABLE}?select=id,name,email,role,active,approved,last_access_at,must_change_password,product_ids,salt,password_hash&order=id.asc`, {
     headers: { apikey: key },
   });
 }

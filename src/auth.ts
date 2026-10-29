@@ -1,5 +1,5 @@
 ﻿export type AccessRole = "Administrador" | "Gestor" | "Visualização";
-export type Account = { id: string; name: string; email: string; role: AccessRole; productIds?: number[]; active?: boolean; lastAccessAt?: string; mustChangePassword?: boolean; salt: string; passwordHash: string };
+export type Account = { id: string; name: string; email: string; role: AccessRole; productIds?: number[]; active?: boolean; approved?: boolean; lastAccessAt?: string; mustChangePassword?: boolean; salt: string; passwordHash: string };
 
 import { savePortalAccounts } from "./database";
 
@@ -42,9 +42,9 @@ export function loadAccounts(): Account[] {
   } catch { return [initialAdmin]; }
 }
 
-export function saveAccounts(accounts: Account[]) {
+export function saveAccounts(accounts: Account[]): Promise<boolean> {
   localStorage.setItem(USERS_KEY, JSON.stringify(accounts));
-  void savePortalAccounts(accounts);
+  return savePortalAccounts(accounts);
 }
 
 export function sessionId() {
