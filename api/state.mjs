@@ -29,10 +29,27 @@ function getSupabaseConfig() {
 function safeDiagnostic(error) {
   const message = error instanceof Error ? error.message : "";
   if (message === "Supabase configuration is missing.") return "Configuração do Supabase ausente.";
-  const responseError = message.match(/^Supabase returned HTTP (\d+) while (loading records|saving records|loading demands)\.$/);
-  if (responseError) return `Supabase respondeu HTTP ${responseError[1]} durante ${responseError[2]}.`;
+  const responseError = message.match(/^Supabase returned HTTP (\d+) while (saving ([\w:-]+) \(RPC ([\w_]+)\))(?: \[([A-Z0-9]+)\])?(?:: (.+))?\.$/);
+  if (responseError) {
+    const [, status, operation, collection, rpc, code, reason] = responseError;
+    return `Supabase respondeu HTTP ${status} ao gravar ${collection} via ${rpc}${code ? ` (código ${code})` : ""}.${reason ? ` ${reason}` : ""}`;
+  }
+  const readError = message.match(/^Supabase returned HTTP (\d+) while (loading records|loading demands)\.$/);
+  if (readError) return `Supabase respondeu HTTP ${readError[1]} durante ${readError[2]}.`;
   if (error instanceof TypeError) return "Falha de rede ao acessar o Supabase.";
   return "Falha interna ao acessar o Supabase. Consulte os logs da função na Vercel.";
+}
+
+function safeDatabaseMessage(message) {
+  const knownMessages = new Set([
+    "Invalid portal collection.",
+    "Portal records must be a JSON array.",
+    "Each portal record must be a JSON object with an identifier.",
+    "Demands must be a JSON array.",
+    "Each demand must have an id and name.",
+    "A demand references a product that does not exist in public.products.",
+  ]);
+  return knownMessages.has(message) ? message : "";
 }
 
 function isCollectionPayload(records) {
@@ -120,14 +137,29 @@ async function fetchAllRows(url, key, query) {
 
 async function replaceCollection(url, key, collection, records) {
   const isDemands = collection === DEMANDS_COLLECTION;
-  const response = await fetch(url + "/rest/v1/rpc/" + (isDemands ? DEMANDS_REPLACE_RPC : REPLACE_RPC), {
+  const rpc = isDemands ? DEMANDS_REPLACE_RPC : REPLACE_RPC;
+  const response = await fetch(url + "/rest/v1/rpc/" + rpc, {
     method: "POST",
     headers: { apikey: key, "content-type": "application/json" },
     body: JSON.stringify(isDemands
       ? { p_records: records }
       : { p_collection: collection, p_records: records }),
   });
-  if (!response.ok) throw new Error("Supabase returned HTTP " + response.status + " while saving records.");
+  if (!response.ok) {
+    let code = "";
+    let reason = "";
+    try {
+      const body = await response.json();
+      if (typeof body.code === "string" && /^[A-Z0-9]{4,10}$/.test(body.code)) code = body.code;
+      if (typeof body.message === "string") reason = safeDatabaseMessage(body.message);
+    } catch {
+      // Keep the HTTP status and RPC name when Supabase returns no JSON error body.
+    }
+    throw new Error(
+      `Supabase returned HTTP ${response.status} while saving ${collection} (RPC ${rpc})` +
+      `${code ? ` [${code}]` : ""}${reason ? `: ${reason}` : ""}.`,
+    );
+  }
 }
 
 export default async function handler(request, response) {
