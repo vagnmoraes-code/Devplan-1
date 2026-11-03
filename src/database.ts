@@ -21,8 +21,21 @@ export function readPortalAccounts(): unknown[] {
   return portalAccountsCache;
 }
 
-function reportDatabaseError() {
-  window.dispatchEvent(new CustomEvent("portal-database-error"));
+function reportDatabaseError(error?: unknown) {
+  const detail = error instanceof Error ? error.message : undefined;
+  window.dispatchEvent(new CustomEvent("portal-database-error", { detail }));
+}
+
+async function throwApiError(response: Response, path: string): Promise<never> {
+  let detail = "";
+  try {
+    const body = await response.json() as { detail?: unknown; error?: unknown };
+    if (typeof body.detail === "string") detail = body.detail;
+    else if (typeof body.error === "string") detail = body.error;
+  } catch {
+    // Keep the HTTP status when the API response has no JSON body.
+  }
+  throw new Error(`${path} respondeu HTTP ${response.status}.${detail ? ` ${detail}` : ""}`);
 }
 
 export function savePortalState(key: string, value: unknown): Promise<boolean> {
@@ -36,12 +49,12 @@ export function savePortalState(key: string, value: unknown): Promise<boolean> {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ key, value }),
       });
-      if (!response.ok) throw new Error(`/api/state respondeu HTTP ${response.status}.`);
+      if (!response.ok) await throwApiError(response, "/api/state");
       portalStateCache.set(key, value);
       return true;
     } catch (error) {
       console.error("Falha ao sincronizar o estado:", error);
-      reportDatabaseError();
+      reportDatabaseError(error);
       return false;
     }
   });
@@ -60,12 +73,12 @@ export async function savePortalAccounts(accounts: unknown[]): Promise<boolean> 
       headers: { "content-type": "application/json" },
       body: JSON.stringify(accounts),
     });
-    if (!response.ok) throw new Error(`/api/accounts respondeu HTTP ${response.status}.`);
+    if (!response.ok) await throwApiError(response, "/api/accounts");
     portalAccountsCache = accounts;
     return true;
   } catch (error) {
     console.error("Falha ao sincronizar usuários:", error);
-    reportDatabaseError();
+    reportDatabaseError(error);
     return false;
   }
 }
@@ -88,14 +101,14 @@ function accountFromDatabaseRow(row: Record<string, unknown>) {
 
 async function initializePortalAccounts() {
   const response = await fetch("/api/accounts");
-  if (!response.ok) throw new Error("/api/accounts returned HTTP " + response.status + ".");
+  if (!response.ok) await throwApiError(response, "/api/accounts");
   const { rows } = await response.json() as { rows: Array<Record<string, unknown>> };
   portalAccountsCache = rows.map(accountFromDatabaseRow);
 }
 
 export async function initializePortalDatabase() {
   const response = await fetch("/api/state");
-  if (!response.ok) throw new Error("/api/state returned HTTP " + response.status + ".");
+  if (!response.ok) await throwApiError(response, "/api/state");
 
   const { rows } = await response.json() as { rows: Array<{ key: string; value: unknown }> };
   const stateByKey = new Map(rows
@@ -111,7 +124,7 @@ export async function initializePortalDatabase() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(missingRows),
     });
-    if (!seedResponse.ok) throw new Error("Could not initialize empty database collections.");
+    if (!seedResponse.ok) await throwApiError(seedResponse, "/api/state (inicialização)");
   }
 
   for (const key of portalStateKeys) {

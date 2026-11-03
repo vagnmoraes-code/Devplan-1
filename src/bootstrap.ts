@@ -44,7 +44,10 @@ function showDatabaseError(error?: unknown) {
     : `Banco do Supabase indisponível. Nova tentativa automática em ${retryDelayMs / 1000} segundos.${detail} `;
 }
 
-window.addEventListener("portal-database-error", () => showDatabaseError());
+window.addEventListener("portal-database-error", event => {
+  const detail = (event as CustomEvent<unknown>).detail;
+  showDatabaseError(typeof detail === "string" ? new Error(detail) : undefined);
+});
 
 async function initializeAndOpenPortal(): Promise<void> {
   if (initialization) return initialization;

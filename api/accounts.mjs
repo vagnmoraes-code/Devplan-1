@@ -13,6 +13,13 @@ function getSupabaseConfig() {
   return { url, key };
 }
 
+function safeDiagnostic(error) {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("Supabase ausente")) return "Configuração do Supabase ausente.";
+  if (error instanceof TypeError) return "Falha de rede ao acessar o Supabase.";
+  return "Falha interna ao acessar o Supabase. Consulte os logs da função na Vercel.";
+}
+
 export default async function handler(request, response) {
   if (request.method !== "GET" && request.method !== "POST") {
     response.setHeader("allow", "GET, POST");
@@ -25,7 +32,10 @@ export default async function handler(request, response) {
       const result = await loadAccountRows(url, key);
       if (!result.ok) {
         console.error(`Supabase respondeu HTTP ${result.status} ao carregar usuários.`);
-        return sendJson(response, 502, { error: "Não foi possível carregar os usuários do Supabase." });
+        return sendJson(response, 502, {
+          error: "Não foi possível carregar os usuários do Supabase.",
+          detail: `Supabase respondeu HTTP ${result.status} ao carregar usuários.`,
+        });
       }
       return sendJson(response, 200, { rows: await result.json() });
     }
@@ -37,11 +47,17 @@ export default async function handler(request, response) {
     const result = await replaceAccountRows(url, key, request.body);
     if (!result.ok) {
       console.error(`Supabase respondeu HTTP ${result.status} ao salvar usuários.`);
-      return sendJson(response, 502, { error: "Não foi possível salvar os usuários no Supabase." });
+      return sendJson(response, 502, {
+        error: "Não foi possível salvar os usuários no Supabase.",
+        detail: `Supabase respondeu HTTP ${result.status} ao salvar usuários.`,
+      });
     }
     return sendJson(response, 200, { ok: true });
   } catch (error) {
     console.error("Falha ao acessar usuários no Supabase:", error.name || "Erro de rede");
-    return sendJson(response, 502, { error: "Falha de comunicação com o Supabase." });
+    return sendJson(response, 502, {
+      error: "Falha de comunicação com o Supabase.",
+      detail: safeDiagnostic(error),
+    });
   }
 }

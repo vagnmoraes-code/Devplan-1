@@ -2799,7 +2799,7 @@ function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [cmd, setCmd] = useState(false);
   const role=activeUser?.role ?? "Visualização";
-  async function updateAccounts(next:Account[]){if(await saveAccounts(next))setAccounts(next);else window.dispatchEvent(new CustomEvent("portal-database-error"))}
+  async function updateAccounts(next:Account[]){if(await saveAccounts(next))setAccounts(next)}
   async function login(account:Account,remember:boolean,next?:Account[]){const lastAccessAt=new Date().toISOString();const updated=(next??loadAccounts()).map(user=>user.id===account.id?{...user,lastAccessAt}:user);if(!await saveAccounts(updated))throw new Error("Falha ao salvar acesso no Supabase.");setAccounts(updated);setSession(account.id,remember);setActiveId(account.id)}
   function logout(){setSession(null);setActiveId(null);setCmd(false)}
   const allowedNav=nav.filter(([name])=>role==="Administrador"?true:role==="Gestor"?["Visão geral","Demandas","Roadmap","Iniciativas","Baseline","Produtos","Capacidade","Analytics"].includes(name):["Demandas","Roadmap","Iniciativas","Baseline","Capacidade","Analytics"].includes(name));

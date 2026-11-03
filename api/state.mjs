@@ -26,6 +26,15 @@ function getSupabaseConfig() {
   return { url, key };
 }
 
+function safeDiagnostic(error) {
+  const message = error instanceof Error ? error.message : "";
+  if (message === "Supabase configuration is missing.") return "Configuração do Supabase ausente.";
+  const responseError = message.match(/^Supabase returned HTTP (\d+) while (loading records|saving records|loading demands)\.$/);
+  if (responseError) return `Supabase respondeu HTTP ${responseError[1]} durante ${responseError[2]}.`;
+  if (error instanceof TypeError) return "Falha de rede ao acessar o Supabase.";
+  return "Falha interna ao acessar o Supabase. Consulte os logs da função na Vercel.";
+}
+
 function isCollectionPayload(records) {
   return records.length > 0 && records.every(item =>
     item && STATE_KEYS.has(item.key) && Array.isArray(item.value) &&
@@ -140,6 +149,9 @@ export default async function handler(request, response) {
     return sendJson(response, 200, { ok: true });
   } catch (error) {
     console.error("Portal records request failed:", error.message || error.name || "NetworkError");
-    return sendJson(response, 502, { error: "Could not access Supabase records." });
+    return sendJson(response, 502, {
+      error: "Could not access Supabase records.",
+      detail: safeDiagnostic(error),
+    });
   }
 }
