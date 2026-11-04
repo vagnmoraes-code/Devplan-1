@@ -38,8 +38,29 @@ async function throwApiError(response: Response, path: string): Promise<never> {
   throw new Error(`${path} respondeu HTTP ${response.status}.${detail ? ` ${detail}` : ""}`);
 }
 
+function duplicateDemandId(value: unknown): string | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const seen = new Set<string>();
+  for (const row of value) {
+    if (!row || typeof row !== "object" || !("id" in row)) continue;
+    const id = String(row.id ?? "");
+    if (!id) continue;
+    if (seen.has(id)) return id;
+    seen.add(id);
+  }
+}
+
 export function savePortalState(key: string, value: unknown): Promise<boolean> {
   if (!portalStateKeys.includes(key as PortalStateKey)) return Promise.resolve(false);
+  if (key === "dev-plan:demands") {
+    const duplicateId = duplicateDemandId(value);
+    if (duplicateId) {
+      const error = new Error(`ID de demanda repetido (${duplicateId}); cada demanda precisa ter um ID único.`);
+      console.error("Falha ao sincronizar demandas:", error.message);
+      reportDatabaseError(error);
+      return Promise.resolve(false);
+    }
+  }
 
   const previous = pendingStateSaves.get(key) ?? Promise.resolve(true);
   const current = previous.then(async () => {

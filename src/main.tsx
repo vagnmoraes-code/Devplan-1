@@ -86,6 +86,12 @@ type Demand = {
   dueDate?: string;
   resourceIds?: number[];
 };
+function nextDemandId(rows: Demand[]) {
+  const existingIds = new Set(rows.map(row => row.id));
+  let sequence = 160;
+  while (existingIds.has(`DEV-${sequence}`)) sequence += 1;
+  return `DEV-${sequence}`;
+}
 type InitiativeStatus = "Não iniciada" | "Em andamento" | "Concluída" | "Bloqueada";
 type Initiative = { id: string; name: string; status: InitiativeStatus; startDate: string; endDate: string; owner: string; observation: string; progress: number };
 type ChangeLog={id:number;date:string;title:string;actor:string;detail:string;tone:"blue"|"good"|"warn"|"bad";product?:string;quarter?:string;demandId?:string;demandName?:string};
@@ -1218,7 +1224,7 @@ function Demands() {
       .toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })
       .replace(".", "");
     const data: Demand = {
-      id: editing?.id || `DEV-${160 + rows.length}`,
+      id: editing?.id || nextDemandId(rows),
       name: form.name.trim(),
       product: form.product,
       owner: form.owner.trim() || "",
