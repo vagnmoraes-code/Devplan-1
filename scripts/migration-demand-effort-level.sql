@@ -8,7 +8,7 @@ begin
   if jsonb_typeof(p_records) <> 'array' then
     raise exception 'Demands must be a JSON array.';
   end if;
-
+  
   if exists (
     select 1 from jsonb_array_elements(p_records) as item(value)
     where jsonb_typeof(item.value) <> 'object'
