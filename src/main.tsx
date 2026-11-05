@@ -1087,7 +1087,7 @@ const emptyDemandForm = {
   due: "",
   startDate: "",
   endDate: "",
-  effort: "40",
+  effort: "",
   effortLevel: "Médio",
   billable: "false",
   billedAmount: "",
@@ -1174,7 +1174,7 @@ function Demands() {
       const text=(row:ExcelJS.Row,names:string[])=>{const value=raw(row,names);if(value===undefined||value===null)return "";if(typeof value==="object"&&"text" in value)return String(value.text).trim();return String(value).trim()};
       const numeric=(row:ExcelJS.Row,names:string[])=>{const value=raw(row,names);if(typeof value==="number")return value;const normalized=text(row,names).replace(/\s/g,"").replace(/\.(?=\d{3}(?:\D|$))/g,"").replace(",",".");return normalized?Number(normalized):undefined};
       const iso=(row:ExcelJS.Row,names:string[])=>{const value=raw(row,names);if(value instanceof Date&&!Number.isNaN(value.getTime()))return `${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,"0")}-${String(value.getDate()).padStart(2,"0")}`;const source=text(row,names);if(!source)return "";const match=source.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);if(match){const date=new Date(Number(match[3]),Number(match[2])-1,Number(match[1]));return date.getFullYear()===Number(match[3])&&date.getMonth()===Number(match[2])-1&&date.getDate()===Number(match[1])?`${match[3]}-${match[2].padStart(2,"0")}-${match[1].padStart(2,"0")}`:""}const parsed=source.match(/^(\d{4})-(\d{2})-(\d{2})$/);if(parsed){const date=new Date(Number(parsed[1]),Number(parsed[2])-1,Number(parsed[3]));return date.getFullYear()===Number(parsed[1])&&date.getMonth()===Number(parsed[2])-1&&date.getDate()===Number(parsed[3])?source:""}return ""};
-      if(!findColumn(["Título","Demanda"])||!findColumn(["Produto"])||!findColumn(["Categoria","Tipo"])||!findColumn(["Esforço Estimado (Horas)","Capacidade estimada","Horas"])){
+      if(!findColumn(["Título","Demanda"])||!findColumn(["Produto"])||!findColumn(["Categoria","Tipo"])){
         setImportFeedback("Os cabeçalhos não correspondem ao modelo de importação. Use a aba Demandas do modelo atualizado.");return;
       }
       sheet.eachRow((row,rowNumber)=>{
@@ -1184,14 +1184,15 @@ function Demands() {
         const productText=text(row,["produto *","produto"]);
         const product=products.find((item)=>item.name.toLocaleLowerCase("pt-BR")===productText.toLocaleLowerCase("pt-BR")&&item.active);
         const category=text(row,["categoria *","categoria","tipo"]);
-        const effort=numeric(row,["esforço estimado (horas)","esforco estimado (horas)","capacidade estimada","horas"]);
+        const effortValue=numeric(row,["esforço estimado (horas)","esforco estimado (horas)","capacidade estimada","horas"]);
+        const effort=effortValue??0;
         const effortLevel=text(row,["esforço","esforco","nível de esforço","nivel de esforco"]);
         const startDate=iso(row,["data de início","data de inicio","início","inicio"]);
         const endDate=iso(row,["data de término","data de termino","término","termino"]);
         const dueDate=iso(row,["prazo desejado","prazo","data fim","data de fim"]);
         const artifactUrl=text(row,["link do artefato","url do artefato","link"]);
         const quarter=text(row,["quarter desejado","quarter","trimestre"]);
-        if(!name||!product||!category||!Number.isFinite(effort)||Number(effort)<=0||(startDate&&endDate&&endDate<startDate)||(artifactUrl&&!/^https?:\/\//i.test(artifactUrl))){ignored++;if(!name)missingTitle++;if(!product)invalidProduct++;if(!category||!Number.isFinite(effort)||Number(effort)<=0||(startDate&&endDate&&endDate<startDate)||(artifactUrl&&!/^https?:\/\//i.test(artifactUrl)))invalidRequired++;return}
+        if(!name||!product||!category||(effortValue!==undefined&&(!Number.isFinite(effortValue)||effortValue<0))||(startDate&&endDate&&endDate<startDate)||(artifactUrl&&!/^https?:\/\//i.test(artifactUrl))){ignored++;if(!name)missingTitle++;if(!product)invalidProduct++;if(!category||(effortValue!==undefined&&(!Number.isFinite(effortValue)||effortValue<0))||(startDate&&endDate&&endDate<startDate)||(artifactUrl&&!/^https?:\/\//i.test(artifactUrl)))invalidRequired++;return}
         const id=newDemandId();
         const billableText=text(row,["faturamento","faturável","faturavel"]).toLocaleLowerCase("pt-BR");
         const billable=["sim","true","sim, faturável","faturável","faturavel"].includes(billableText);
@@ -1278,7 +1279,7 @@ function Demands() {
     if (!form.name.trim()) next.name = "Informe o título da demanda.";
     if (!form.product) next.product = "Selecione um produto cadastrado.";
     if (!form.type) next.type = "Selecione uma categoria.";
-    if (Number(form.effort) <= 0) next.effort = "Informe um esforço válido.";
+    if (form.effort.trim() !== "" && (!Number.isFinite(Number(form.effort)) || Number(form.effort) < 0)) next.effort = "Informe um esforço igual ou maior que zero.";
     if (form.startDate && form.endDate && form.endDate < form.startDate) next.endDate = "A data de término deve ser igual ou posterior à data de início.";
     if (form.artifactUrl.trim() && !/^https?:\/\//i.test(form.artifactUrl.trim())) next.artifactUrl = "Informe um link iniciado por http:// ou https://.";
     const billedAmount = Number(form.billedAmount);
@@ -1297,7 +1298,7 @@ function Demands() {
       status: form.status,
       priority: form.priority,
       effortLevel: form.effortLevel,
-      effort: Number(form.effort),
+      effort: form.effort.trim() === "" ? 0 : Number(form.effort),
       actualEffort: editing?.actualEffort,
       billable: form.billable === "true",
       billedAmount: form.billable === "true" ? Math.round(billedAmount * 100) / 100 : 0,
@@ -1521,7 +1522,7 @@ function Demands() {
               <div className="form-field"><label htmlFor="endDate">Data de término</label><input id="endDate" type="date" name="endDate" min={form.startDate || undefined} value={form.endDate} onChange={change} className={errors.endDate ? "invalid" : ""}/>{errors.endDate && <small className="field-error">{errors.endDate}</small>}</div>
               <div className="form-field wide"><label htmlFor="due">Prazo desejado <span className="optional-label">Opcional</span></label><input id="due" type="date" name="due" value={form.due} onChange={change}/></div>
               <div className="form-field"><label htmlFor="effortLevel">Esforço</label><select id="effortLevel" name="effortLevel" value={form.effortLevel} onChange={change}><option>Alto</option><option>Médio</option><option>Baixo</option></select></div>
-              <div className="form-field"><label htmlFor="effort">Esforço Estimado (Horas)</label><input id="effort" type="number" min="1" step="0.5" name="effort" required value={form.effort} onChange={change} className={errors.effort ? "invalid" : ""}/>{errors.effort && <small className="field-error">{errors.effort}</small>}</div>
+              <div className="form-field"><label htmlFor="effort">Esforço Estimado (Horas) <span className="optional-label">Opcional</span></label><input id="effort" type="number" min="0" step="0.5" name="effort" value={form.effort} onChange={change} className={errors.effort ? "invalid" : ""}/>{errors.effort && <small className="field-error">{errors.effort}</small>}</div>
               <div className="form-field"><label htmlFor="billable">Faturamento</label><select id="billable" name="billable" value={form.billable} onChange={change}><option value="false">Não faturável</option><option value="true">Faturável</option></select></div>
               <div className="form-field"><label htmlFor="billedAmount">Valor faturado (R$)</label><input id="billedAmount" name="billedAmount" type="number" min="0" step="0.01" value={form.billedAmount} onChange={change} disabled={form.billable !== "true"} placeholder="0,00" className={errors.billedAmount ? "invalid" : ""}/>{errors.billedAmount && <small className="field-error" role="alert">{errors.billedAmount}</small>}</div>
               <section className="form-field wide resource-picker-field" aria-label="Recursos da demanda">

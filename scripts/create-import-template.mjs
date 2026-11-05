@@ -24,7 +24,7 @@ const fields = [
   ["Data de início", "inicio", 17],
   ["Data de término", "termino", 17],
   ["Prazo desejado", "prazo", 18],
-  ["Esforço Estimado (Horas) *", "esforcoEstimadoHoras", 25],
+  ["Esforço Estimado (Horas)", "esforcoEstimadoHoras", 25],
   ["Faturamento", "faturamento", 16],
   ["Valor faturado (R$)", "valor", 21],
   ["Observação", "observacao", 40],
@@ -107,7 +107,7 @@ instructions.addRows([
   ["Categoria", "Sim", "Escolha uma opção da lista. Campo obrigatório no cadastro do portal."],
   ["Impacto", "Não", "Escolha Baixo, Médio ou Alto."],
   ["Esforço", "Não", "Escolha Alto, Médio ou Baixo."],
-  ["Esforço Estimado (Horas)", "Sim", "Número maior que zero. Aceita casas decimais; pode usar vírgula ou ponto."],
+  ["Esforço Estimado (Horas)", "Não", "Opcional. Se ficar vazio, a demanda será importada com 0 horas. Quando informado, deve ser um número igual ou maior que zero; aceita vírgula ou ponto decimal."],
   ["Responsável", "Não", "Se ficar vazio, o portal usa o primeiro nome do coordenador cadastrado no produto."],
   ["Quarter desejado", "Não", "Planejamento mantém a demanda sem quarter no roadmap. Um quarter Qn AAAA adiciona a demanda ao período correspondente."],
   ["Datas", "Não", "Use uma data real no Excel ou DD/MM/AAAA ou AAAA-MM-DD. Data de término deve ser igual ou posterior à data de início."],
@@ -128,6 +128,6 @@ instructions.getRow(2).height = 42;
 for (let row = 2; row <= instructions.rowCount; row += 1) instructions.getRow(row).height = 34;
 instructions.autoFilter = { from: "A1", to: `C${instructions.rowCount}` };
 
-for (const path of ["modelo-importacao-demandas.xlsx", "modelo-importacao-demandas-atualizado.xlsx"]) {
+for (const path of ["modelo-importacao-demandas.xlsx", "modelo-importacao-demandas-opcional.xlsx"]) {
   await workbook.xlsx.writeFile(path);
 }
