@@ -33,9 +33,15 @@ function safeDiagnostic(error) {
   if (responseError) {
     const [, status, operation, collection, rpc, code, reason] = responseError;
     if (status === "400" && code === "21000") {
-      return collection === DEMANDS_COLLECTION
-        ? "Há IDs de demanda repetidos. Cada demanda precisa ter um ID único; corrija os registros e tente novamente."
-        : "Há identificadores repetidos na coleção. Corrija os registros e tente novamente.";
+      if (reason === "DELETE requires a WHERE clause") {
+        return `Supabase bloqueou um DELETE sem cláusula WHERE ao gravar ${collection} via ${rpc}.`;
+      }
+      if (reason === "ON CONFLICT DO UPDATE command cannot affect row a second time") {
+        return collection === DEMANDS_COLLECTION
+          ? "Há IDs de demanda repetidos. Cada demanda precisa ter um ID único; corrija os registros e tente novamente."
+          : "Há identificadores repetidos na coleção. Corrija os registros e tente novamente.";
+      }
+      return `Supabase recusou a gravação de ${collection} via ${rpc} (código 21000).`;
     }
     return `Supabase respondeu HTTP ${status} ao gravar ${collection} via ${rpc}${code ? ` (código ${code})` : ""}.${reason ? ` ${reason}` : ""}`;
   }
@@ -75,6 +81,8 @@ function safeDatabaseMessage(message) {
     "Demands must be a JSON array.",
     "Each demand must have an id and name.",
     "Demand IDs must be unique.",
+    "DELETE requires a WHERE clause",
+    "ON CONFLICT DO UPDATE command cannot affect row a second time",
     "A demand references a product that does not exist in public.products.",
   ]);
   return knownMessages.has(message) ? message : "";

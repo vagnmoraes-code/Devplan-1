@@ -314,7 +314,8 @@ begin
     where item.value->>'id' = demand.id
   );
 
-  delete from public.demand_staff;
+  delete from public.demand_staff
+  where demand_id in (select id from public.demands);
 
   insert into public.demands (
     id, name, product_id, owner, status, priority, effort, actual_effort,
