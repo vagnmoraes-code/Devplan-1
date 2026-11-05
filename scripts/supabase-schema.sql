@@ -260,6 +260,15 @@ begin
   end if;
 
   if exists (
+    select item.value->>'id'
+    from jsonb_array_elements(p_records) as item(value)
+    group by item.value->>'id'
+    having count(*) > 1
+  ) then
+    raise exception 'Demand IDs must be unique.' using errcode = '22023';
+  end if;
+
+  if exists (
     select 1
     from jsonb_array_elements(p_records) as item(value)
     where nullif(item.value->>'product', '') is not null

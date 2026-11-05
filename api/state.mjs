@@ -32,12 +32,37 @@ function safeDiagnostic(error) {
   const responseError = message.match(/^Supabase returned HTTP (\d+) while (saving ([\w:-]+) \(RPC ([\w_]+)\))(?: \[([A-Z0-9]+)\])?(?:: (.+))?\.$/);
   if (responseError) {
     const [, status, operation, collection, rpc, code, reason] = responseError;
+    if (status === "400" && code === "21000") {
+      return collection === DEMANDS_COLLECTION
+        ? "Há IDs de demanda repetidos. Cada demanda precisa ter um ID único; corrija os registros e tente novamente."
+        : "Há identificadores repetidos na coleção. Corrija os registros e tente novamente.";
+    }
     return `Supabase respondeu HTTP ${status} ao gravar ${collection} via ${rpc}${code ? ` (código ${code})` : ""}.${reason ? ` ${reason}` : ""}`;
   }
   const readError = message.match(/^Supabase returned HTTP (\d+) while (loading records|loading demands)\.$/);
   if (readError) return `Supabase respondeu HTTP ${readError[1]} durante ${readError[2]}.`;
   if (error instanceof TypeError) return "Falha de rede ao acessar o Supabase.";
   return "Falha interna ao acessar o Supabase. Consulte os logs da função na Vercel.";
+}
+
+function duplicateDemandId(records) {
+  const demandRecord = records.find(record => record.key === DEMANDS_COLLECTION);
+  if (!demandRecord) return false;
+
+  const seen = new Set();
+  for (const demand of demandRecord.value) {
+    const id = typeof demand.id === "string" ? demand.id.trim() : "";
+    if (id && seen.has(id)) return true;
+    if (id) seen.add(id);
+  }
+  return false;
+}
+
+function isCardinalityViolation(error) {
+  if (!(error instanceof Error)) return false;
+  const responseError = error.message.match(/^Supabase returned HTTP 400 while saving [\w:-]+ \(RPC [\w_]+\) \[([A-Z0-9]+)\](?:: (.+))?\.$/);
+  return responseError?.[1] === "21000" ||
+    (responseError?.[1] === "22023" && responseError[2] === "Demand IDs must be unique.");
 }
 
 function safeDatabaseMessage(message) {
@@ -47,6 +72,7 @@ function safeDatabaseMessage(message) {
     "Each portal record must be a JSON object with an identifier.",
     "Demands must be a JSON array.",
     "Each demand must have an id and name.",
+    "Demand IDs must be unique.",
     "A demand references a product that does not exist in public.products.",
   ]);
   return knownMessages.has(message) ? message : "";
@@ -176,13 +202,20 @@ export default async function handler(request, response) {
 
     const records = Array.isArray(request.body) ? request.body : [request.body];
     if (!isCollectionPayload(records)) return sendJson(response, 400, { error: "Invalid collection data." });
+    if (duplicateDemandId(records)) {
+      return sendJson(response, 400, {
+        error: "Invalid demand data.",
+        detail: "Há IDs de demanda repetidos. Cada demanda precisa ter um ID único; corrija os registros e tente novamente.",
+      });
+    }
 
     for (const record of records) await replaceCollection(url, key, record.key, record.value);
     return sendJson(response, 200, { ok: true });
   } catch (error) {
     console.error("Portal records request failed:", error.message || error.name || "NetworkError");
-    return sendJson(response, 502, {
-      error: "Could not access Supabase records.",
+    const cardinalityViolation = isCardinalityViolation(error);
+    return sendJson(response, cardinalityViolation ? 400 : 502, {
+      error: cardinalityViolation ? "Invalid record data." : "Could not access Supabase records.",
       detail: safeDiagnostic(error),
     });
   }
