@@ -346,10 +346,10 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const progress = scoped.length ? Math.round(scoped.reduce((sum, d) => sum + d.progress, 0) / scoped.length) : 0;
   const criticalDemands = scoped.filter(demand => ["alto", "crítico", "critico"].includes(demand.risk.trim().toLocaleLowerCase("pt-BR"))).length;
   const kpis = [
-    ["Capacidade total", `${totalCapacity}h`, `${utilization}% alocada · ${scopedTeam.length} colaboradores`, utilization > 90 ? "bad" : "blue", I.Users],
-    ["Capacidade estimada", `${effort}h`, `${scoped.length} demandas`, "warn", I.Gauge],
-    ["Roadmap planejado", String(planned.length), `${completed} concluídas`, "blue", I.Map],
-    ["Progresso médio", `${progress}%`, "no escopo atual", "good", I.Crosshair],
+    ["Capacidade total", `${totalCapacity}h`, `${utilization}% alocada · ${scopedTeam.length} colaboradores`, utilization > 90 ? "bad" : "blue", I.Users, utilization > 90 ? "kpi-capacity-critical" : "kpi-capacity"],
+    ["Capacidade estimada", `${effort}h`, `${scoped.length} demandas`, "warn", I.Gauge, "kpi-effort"],
+    ["Roadmap planejado", String(planned.length), `${completed} concluídas`, "cyan", I.Map, "kpi-roadmap"],
+    ["Progresso médio", `${progress}%`, "no escopo atual", "good", I.Crosshair, "kpi-progress"],
   ];
   return (
     <>
@@ -359,8 +359,8 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
       />
       <div className="dashboard-filter"><div><I.Filter/><span><b>Escopo dos indicadores</b><small>Visualize o consolidado ou um produto específico</small></span></div><select value={productFilter} onChange={(e) => setProductFilter(e.target.value)}><option>Todos</option>{products.filter((p)=>p.active).map((p)=><option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
       <div className="kpis dashboard-kpis">
-        {kpis.map(([n, v, d, t, Icon]: any) => (
-          <Card key={n} className="kpi">
+        {kpis.map(([n, v, d, t, Icon, cardTone]: any) => (
+          <Card key={n} className={`kpi ${cardTone}`}>
             <div className={"kicon " + t}>
               <Icon />
             </div>
@@ -956,10 +956,6 @@ function Timeline({
           <div className="tlrow" key={d.id}>
             <div>
               <b>{d.name}</b>
-              <small>
-                {d.id} · {entry.collaborators.length || 0} colaborador(es) ·{" "}
-                {d.effort}h
-              </small>
             </div>
             <div className="track">
               <span
@@ -968,7 +964,7 @@ function Timeline({
                 onClick={() => onStaff(entry)}
                 title="Ver colaboradores alocados"
               >
-                <em>{d.progress}% · {d.startDate ? new Date(d.startDate+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short"}) : "início não informado"}</em>
+                <em>{roadmapProgress(d)}% · {d.startDate ? new Date(d.startDate+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short"}) : "início não informado"}</em>
               </span>
               <i style={{ left: "66%" }} />
               <div className="timeline-actions">
@@ -1013,6 +1009,7 @@ function RoadmapList({
           <thead>
             <tr>
               <th>Demanda</th>
+              <th>Progresso</th>
               <th>Produto</th>
               <th>Colaboradores</th>
               <th>Status</th>
@@ -1023,12 +1020,15 @@ function RoadmapList({
             </tr>
           </thead>
           <tbody>
-            {items.map(({ demand: d, entry }) => (
+            {items.map(({ demand: d, entry }) => {
+              const progress = roadmapProgress(d);
+              const status = progress === 100 ? "Concluído" : displayDemandStatus(d.status);
+              return (
               <tr key={d.id}>
                 <td>
                   <b>{d.name}</b>
-                  <small>{d.id}</small>
                 </td>
+                <td><div className="planning-row-progress"><progress max="100" value={progress} aria-label={`Evolução de ${d.name}`} /><b>{progress}%</b></div></td>
                 <td>{d.product}</td>
                 <td>
                   <button className="staff-link" onClick={() => onStaff(entry)}>
@@ -1039,7 +1039,7 @@ function RoadmapList({
                   </button>
                 </td>
                 <td>
-                  <Badge>{d.status}</Badge>
+                  <Badge tone={progress === 100 ? "good" : "blue"}>{status}</Badge>
                 </td>
                 <td>{demandImpact(d.priority)}</td>
                 <td>{d.effort}h</td>
@@ -1063,12 +1063,20 @@ function RoadmapList({
                   </button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
     </Card>
   );
+}
+
+function roadmapProgress(demand: Demand) {
+  const progress = Number(demand.progress);
+  const status = displayDemandStatus(demand.status);
+  const completed = ["Concluído", "Concluída"].includes(status) || progress >= 100;
+  return completed ? 100 : Math.min(100, Math.max(0, Number.isFinite(progress) ? progress : 0));
 }
 
 const emptyDemandForm = {
@@ -1647,7 +1655,11 @@ function DemandTableRows({
         </thead>
         <tbody>
           {rows.map((d) => {
-            const status = displayDemandStatus(d.status);
+            const currentStatus = displayDemandStatus(d.status);
+            const completedByStatus = ["Concluído", "Concluída"].includes(currentStatus);
+            const completedByProgress = Number(d.progress) >= 100;
+            const status = completedByProgress ? "Concluído" : currentStatus;
+            const progress = completedByStatus || completedByProgress ? 100 : d.progress;
             return <tr key={d.id}>
               <td>
                 {onView ? <button className="demand-title-button" onClick={() => onView(d)}>{d.name}</button> : <b>{d.name}</b>}
@@ -1674,9 +1686,9 @@ function DemandTableRows({
               <td>{demandImpact(d.priority)}</td>
               <td>
                 <div className="mini">
-                  <i style={{ width: d.progress + "%" }} />
+                  <i style={{ width: progress + "%" }} />
                 </div>
-                <small>{d.progress}%</small>
+                <small>{progress}%</small>
               </td>
               <td>{d.due}</td>
               {showRisk && <td>
@@ -2396,7 +2408,7 @@ function Planning() {
       {hasFilters && <button className="ghost" onClick={() => { setProductFilter("Todos"); setQuarterFilter("Todos"); setStatusFilter("Todos"); }}><I.X /> Limpar filtros</button>}
       <span role="status">{filtered.length} de {rows.length} demandas</span>
     </div>
-    {filtered.length ? <Card><div className="tablewrap planning-table-wrap"><table className="planning-table"><thead><tr><th>ID</th><th>Demanda</th><th>Produto</th><th>Quarter</th><th>Responsável</th><th>Impacto</th><th>Prazo</th><th>Status</th><th>Esforço estimado (horas)</th><th>Evolução</th></tr></thead><tbody>
+    {filtered.length ? <Card><div className="tablewrap planning-table-wrap"><table className="planning-table"><thead><tr><th>Demanda</th><th>Produto</th><th>Quarter</th><th>Responsável</th><th>Impacto</th><th>Prazo</th><th>Status</th><th>Esforço estimado (horas)</th><th>Evolução</th></tr></thead><tbody>
       {filtered.map(demand => {
         const progress = Math.min(100, Math.max(0, demand.progress || 0));
         const status = displayDemandStatus(demand.status);
@@ -2404,7 +2416,7 @@ function Planning() {
         const blocked = status === "Bloqueada";
         const due = demand.dueDate ? new Date(`${demand.dueDate}T12:00:00`).toLocaleDateString("pt-BR") : demand.due || "Sem prazo";
         return <tr className={completed ? "planning-row-completed" : blocked ? "planning-row-blocked" : progress > 0 ? "planning-row-active" : "planning-row-pending"} key={demand.id}>
-          <td>{demand.id}</td><td><b>{demand.name}</b></td><td>{demand.product}</td><td>{quarterFor(demand)}</td><td>{demand.owner || "Não informado"}</td><td>{demandImpact(demand.priority)}</td><td>{due}</td><td><Badge tone={completed ? "good" : blocked ? "bad" : "blue"}>{status}</Badge></td><td>{demand.effort}h</td><td><div className="planning-row-progress"><progress max="100" value={progress} aria-label={`Evolução de ${demand.name}`} /><b>{progress}%</b></div></td>
+          <td><b>{demand.name}</b></td><td>{demand.product}</td><td>{quarterFor(demand)}</td><td>{demand.owner || "Não informado"}</td><td>{demandImpact(demand.priority)}</td><td>{due}</td><td><Badge tone={completed ? "good" : blocked ? "bad" : "blue"}>{status}</Badge></td><td>{demand.effort}h</td><td><div className="planning-row-progress"><progress max="100" value={progress} aria-label={`Evolução de ${demand.name}`} /><b>{progress}%</b></div></td>
         </tr>;
       })}
     </tbody></table></div></Card> : <Card><div className="planning-empty"><I.ListTodo aria-hidden="true" /><b>{rows.length ? "Nenhuma demanda encontrada" : "Nenhuma demanda cadastrada"}</b><p>{rows.length ? "Altere ou limpe os filtros para visualizar outras demandas." : "Cadastre demandas na Gestão de demandas para acompanhar o planejamento."}</p></div></Card>}
