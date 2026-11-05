@@ -1,4 +1,4 @@
-# nddPlan — Gestão de Roadmap e Capacidade
+# nddPlanWork — Gestão de Roadmap e Capacidade
 
 MVP navegável de um portal corporativo para planejamento trimestral, gestão de demandas, capacidade, riscos e mudanças.
 

@@ -128,4 +128,6 @@ instructions.getRow(2).height = 42;
 for (let row = 2; row <= instructions.rowCount; row += 1) instructions.getRow(row).height = 34;
 instructions.autoFilter = { from: "A1", to: `C${instructions.rowCount}` };
 
-await workbook.xlsx.writeFile("modelo-importacao-demandas-atualizado.xlsx");
+for (const path of ["modelo-importacao-demandas.xlsx", "modelo-importacao-demandas-atualizado.xlsx"]) {
+  await workbook.xlsx.writeFile(path);
+}

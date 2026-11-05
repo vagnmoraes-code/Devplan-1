@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   createContext,
   useContext,
   useEffect,
@@ -1166,13 +1166,17 @@ function Demands() {
     try{
       const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await file.arrayBuffer());
       const sheet=workbook.worksheets[0];if(!sheet)throw new Error("Planilha sem conteúdo");
-      const headers:Record<number,string>={};sheet.getRow(1).eachCell((cell,col)=>{headers[col]=String(cell.text).trim().toLocaleLowerCase("pt-BR")});
-      const imported:Demand[]=[];const planned:{demandId:string;quarter:string;collaborators:string[];allocations:{staffId:number;hours:number}[]}[]=[];let ignored=0;
-      const findColumn=(names:string[])=>Object.entries(headers).find(([,header])=>names.includes(header))?.[0];
+      const normalizeHeader=(value:string)=>value.normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-zA-Z0-9]+/g," ").trim().toLocaleLowerCase("pt-BR");
+      const headers:Record<number,string>={};sheet.getRow(1).eachCell((cell,col)=>{headers[col]=normalizeHeader(String(cell.text))});
+      const imported:Demand[]=[];const planned:{demandId:string;quarter:string;collaborators:string[];allocations:{staffId:number;hours:number}[]}[]=[];let ignored=0;let missingTitle=0;let invalidProduct=0;let invalidRequired=0;
+      const findColumn=(names:string[])=>{const aliases=names.map(normalizeHeader);return Object.entries(headers).find(([,header])=>aliases.includes(header))?.[0]};
       const raw=(row:ExcelJS.Row,names:string[])=>{const col=findColumn(names);return col?row.getCell(Number(col)).value:undefined};
       const text=(row:ExcelJS.Row,names:string[])=>{const value=raw(row,names);if(value===undefined||value===null)return "";if(typeof value==="object"&&"text" in value)return String(value.text).trim();return String(value).trim()};
       const numeric=(row:ExcelJS.Row,names:string[])=>{const value=raw(row,names);if(typeof value==="number")return value;const normalized=text(row,names).replace(/\s/g,"").replace(/\.(?=\d{3}(?:\D|$))/g,"").replace(",",".");return normalized?Number(normalized):undefined};
       const iso=(row:ExcelJS.Row,names:string[])=>{const value=raw(row,names);if(value instanceof Date&&!Number.isNaN(value.getTime()))return `${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,"0")}-${String(value.getDate()).padStart(2,"0")}`;const source=text(row,names);if(!source)return "";const match=source.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);if(match){const date=new Date(Number(match[3]),Number(match[2])-1,Number(match[1]));return date.getFullYear()===Number(match[3])&&date.getMonth()===Number(match[2])-1&&date.getDate()===Number(match[1])?`${match[3]}-${match[2].padStart(2,"0")}-${match[1].padStart(2,"0")}`:""}const parsed=source.match(/^(\d{4})-(\d{2})-(\d{2})$/);if(parsed){const date=new Date(Number(parsed[1]),Number(parsed[2])-1,Number(parsed[3]));return date.getFullYear()===Number(parsed[1])&&date.getMonth()===Number(parsed[2])-1&&date.getDate()===Number(parsed[3])?source:""}return ""};
+      if(!findColumn(["Título","Demanda"])||!findColumn(["Produto"])||!findColumn(["Categoria","Tipo"])||!findColumn(["Esforço Estimado (Horas)","Capacidade estimada","Horas"])){
+        setImportFeedback("Os cabeçalhos não correspondem ao modelo de importação. Use a aba Demandas do modelo atualizado.");return;
+      }
       sheet.eachRow((row,rowNumber)=>{
         if(rowNumber===1)return;
         let hasContent=false;row.eachCell((cell)=>{if(cell.value!==null&&cell.value!==undefined&&cell.text.trim()!=="")hasContent=true});if(!hasContent)return;
@@ -1187,7 +1191,7 @@ function Demands() {
         const dueDate=iso(row,["prazo desejado","prazo","data fim","data de fim"]);
         const artifactUrl=text(row,["link do artefato","url do artefato","link"]);
         const quarter=text(row,["quarter desejado","quarter","trimestre"]);
-        if(!name||!product||!category||!Number.isFinite(effort)||Number(effort)<=0||(startDate&&endDate&&endDate<startDate)||(artifactUrl&&!/^https?:\/\//i.test(artifactUrl))){ignored++;return}
+        if(!name||!product||!category||!Number.isFinite(effort)||Number(effort)<=0||(startDate&&endDate&&endDate<startDate)||(artifactUrl&&!/^https?:\/\//i.test(artifactUrl))){ignored++;if(!name)missingTitle++;if(!product)invalidProduct++;if(!category||!Number.isFinite(effort)||Number(effort)<=0||(startDate&&endDate&&endDate<startDate)||(artifactUrl&&!/^https?:\/\//i.test(artifactUrl)))invalidRequired++;return}
         const id=newDemandId();
         const billableText=text(row,["faturamento","faturável","faturavel"]).toLocaleLowerCase("pt-BR");
         const billable=["sim","true","sim, faturável","faturável","faturavel"].includes(billableText);
@@ -1207,7 +1211,8 @@ function Demands() {
       });
       if(imported.length)setRows((current)=>[...imported,...current]);
       if(planned.length){setRoadmap(current=>[...current,...planned]);setHistory(current=>[...planned.map(item=>({id:Date.now()+Math.random(),date:new Date().toLocaleString("pt-BR"),title:"Demanda planejada via importação",actor:currentAccount?.name??"Conta ativa",detail:`${item.demandId} incluída em ${item.quarter}`,tone:"good" as const,quarter:item.quarter})),...current]);}
-      setImportFeedback(`${imported.length} demanda(s) importada(s)${ignored?` · ${ignored} linha(s) ignorada(s) por dados obrigatórios ou inválidos`:""}.`);
+      const reasons=[missingTitle?`${missingTitle} sem título`:"",invalidProduct?`${invalidProduct} sem produto ativo cadastrado`:"",invalidRequired?`${invalidRequired} com campo obrigatório ou formato inválido`:""].filter(Boolean).join("; ");
+      setImportFeedback(`${imported.length} demanda(s) importada(s)${ignored?` · ${ignored} linha(s) ignorada(s)${reasons?`: ${reasons}`:""}`:""}.`);
     }catch{setImportFeedback("Não foi possível ler a planilha. Verifique o formato e os cabeçalhos.")}finally{setImporting(false);e.target.value=""}
   };
   const close = () => {
@@ -2763,7 +2768,7 @@ function Login({hasAccounts,onLogin,onRegister}:{hasAccounts:boolean;onLogin:(ac
     if(!hasAccounts){if(password.length<8){setError("Use uma senha com pelo menos 8 caracteres.");return}const account=await makeAccount(name,email,password,"Administrador");const saved=await saveAccounts([account]);if(!saved){setError("N?o foi poss?vel criar o administrador no banco. Confira a conex?o e tente novamente.");return}onRegister([account]);await onLogin(account,remember,[account]);return}
     const account=loadAccounts().find(user=>user.email===email.trim().toLowerCase());if(!account || await hashPassword(password,account.salt)!==account.passwordHash){setError("E-mail ou senha inválidos.");return}if(account.approved===false){setError("Seu cadastro aguarda aprovação do administrador.");return}if(account.active===false){setError("Esta conta está bloqueada. Fale com um administrador.");return}if(account.mustChangePassword){setPendingAccount(account);setPassword("");return}await onLogin(account,remember)
   }catch{setError("Não foi possível autenticar. Verifique sua conexão e tente novamente.")}finally{setBusy(false)}}
-  return <div className="login-screen"><form className="login-card" autoComplete="off" onSubmit={submit}><div className="login-mark"><I.Waypoints/></div><h1>{pendingAccount?"Troque sua senha":registering?"Criar usuário":hasAccounts?"Entrar no nddPlan Work":"Criar administrador"}</h1><p>{pendingAccount?"Por segurança, escolha uma nova senha para continuar.":registering?"Crie seu cadastro. O acesso será liberado após aprovação do administrador.":hasAccounts?"Acesse com seu e-mail e senha.":"Configure o primeiro acesso deste navegador."}</p>{pendingAccount?<><label>Nova senha<input required type="password" autoComplete="new-password" minLength={8} value={newPassword} onChange={event=>setNewPassword(event.target.value)}/></label><label>Confirme a nova senha<input required type="password" autoComplete="new-password" minLength={8} value={confirmPassword} onChange={event=>setConfirmPassword(event.target.value)}/></label><label className="remember-login"><input type="checkbox" checked={remember} onChange={event=>setRemember(event.target.checked)}/><span>Manter conectado neste navegador</span></label></>:<>{(!hasAccounts||registering)&&<label>Nome<input required autoComplete="name" value={name} onChange={event=>setName(event.target.value)}/></label>}<label>E-mail<input required type="email" autoComplete={registering?"email":"username"} value={email} onChange={event=>setEmail(event.target.value)}/></label><label>Senha<input required type="password" minLength={registering||!hasAccounts?8:1} autoComplete={registering||!hasAccounts?"new-password":"current-password"} value={password} onChange={event=>setPassword(event.target.value)}/></label>{!registering&&<label className="remember-login"><input type="checkbox" checked={remember} onChange={event=>setRemember(event.target.checked)}/><span>Manter conectado neste navegador</span></label>}</>}{error&&<p className="auth-error" role="alert">{error}</p>}{notice&&<p className="auth-success" role="status">{notice}</p>}<button className="primary" disabled={busy} type="submit">{busy?"Aguarde...":pendingAccount?"Salvar nova senha":registering?"Enviar cadastro":hasAccounts?"Entrar":"Criar conta e entrar"}</button>{hasAccounts&&!pendingAccount&&<button className="ghost" type="button" onClick={()=>switchMode(!registering)}>{registering?"Já tenho cadastro":"Criar novo usuário"}</button>}<small>Os cadastros e dados do portal são armazenados no banco do portal.</small></form></div>
+  return <div className="login-screen"><form className="login-card" autoComplete="off" onSubmit={submit}><div className="login-mark"><I.Waypoints/></div><h1>{pendingAccount?"Troque sua senha":registering?"Criar usuário":hasAccounts?"Entrar no nddPlanWork":"Criar administrador"}</h1><p>{pendingAccount?"Por segurança, escolha uma nova senha para continuar.":registering?"Crie seu cadastro. O acesso será liberado após aprovação do administrador.":hasAccounts?"Acesse com seu e-mail e senha.":"Configure o primeiro acesso deste navegador."}</p>{pendingAccount?<><label>Nova senha<input required type="password" autoComplete="new-password" minLength={8} value={newPassword} onChange={event=>setNewPassword(event.target.value)}/></label><label>Confirme a nova senha<input required type="password" autoComplete="new-password" minLength={8} value={confirmPassword} onChange={event=>setConfirmPassword(event.target.value)}/></label><label className="remember-login"><input type="checkbox" checked={remember} onChange={event=>setRemember(event.target.checked)}/><span>Manter conectado neste navegador</span></label></>:<>{(!hasAccounts||registering)&&<label>Nome<input required autoComplete="name" value={name} onChange={event=>setName(event.target.value)}/></label>}<label>E-mail<input required type="email" autoComplete={registering?"email":"username"} value={email} onChange={event=>setEmail(event.target.value)}/></label><label>Senha<input required type="password" minLength={registering||!hasAccounts?8:1} autoComplete={registering||!hasAccounts?"new-password":"current-password"} value={password} onChange={event=>setPassword(event.target.value)}/></label>{!registering&&<label className="remember-login"><input type="checkbox" checked={remember} onChange={event=>setRemember(event.target.checked)}/><span>Manter conectado neste navegador</span></label>}</>}{error&&<p className="auth-error" role="alert">{error}</p>}{notice&&<p className="auth-success" role="status">{notice}</p>}<button className="primary" disabled={busy} type="submit">{busy?"Aguarde...":pendingAccount?"Salvar nova senha":registering?"Enviar cadastro":hasAccounts?"Entrar":"Criar conta e entrar"}</button>{hasAccounts&&!pendingAccount&&<button className="ghost" type="button" onClick={()=>switchMode(!registering)}>{registering?"Já tenho cadastro":"Criar novo usuário"}</button>}<small>Os cadastros e dados do portal são armazenados no banco do portal.</small></form></div>
 }
 function App() {
   const productCatalog = useContext(ProductContext);
@@ -2804,7 +2809,7 @@ function App() {
             <I.ArrowUpRight />
           </span>
           <b>
-            nddPlan<span> Work</span>
+            nddPlan<span>Work</span>
           </b>
           <button onClick={() => setCollapsed(!collapsed)}>
             <I.PanelLeftClose />
@@ -2822,6 +2827,7 @@ function App() {
             <span>{activeUser.name.split(" ").map(part=>part[0]).slice(0,2).join("").toUpperCase()}</span>
             <div>
               <b>{activeUser.name}</b>
+              <small className="workspace-version">nddPlanWork 1.0</small>
               <small>{activeUser.role}</small>
               <small className="workspace-email" title={activeUser.email}>{activeUser.email}</small>
             </div>
