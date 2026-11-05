@@ -111,6 +111,7 @@ async function loadDemands(url, key) {
     owner: row.owner || "",
     status: row.status || "",
     priority: row.priority || "",
+    effortLevel: row.effort_level || "Médio",
     effort: Number(row.effort ?? 0),
     ...(row.actual_effort == null ? {} : { actualEffort: Number(row.actual_effort) }),
     ...(row.billable == null ? {} : { billable: row.billable }),

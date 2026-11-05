@@ -99,3 +99,4 @@
 .artifact-link:hover{text-decoration:underline}
 .artifact-link svg{width:13px;height:13px}
 @media(max-width:760px){.resource-picker-options{grid-template-columns:1fr}.demand-form-grid .form-field.wide{grid-column:auto}}
+.priority.baixo i{background:#22c55e}.priority.medio i{background:#38bdf8}.priority.alto i{background:#ef4444}

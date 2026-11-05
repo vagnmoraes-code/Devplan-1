@@ -146,6 +146,7 @@ create table if not exists public.demands (
   owner text not null default '',
   status text not null default '',
   priority text not null default '',
+  effort_level text not null default 'Médio',
   effort numeric not null default 0,
   actual_effort numeric,
   billable boolean,
@@ -170,6 +171,7 @@ alter table public.demands add column if not exists sort_order integer not null 
 alter table public.demands add column if not exists artifact_url text;
 alter table public.demands add column if not exists description text;
 alter table public.demands add column if not exists end_date text;
+alter table public.demands add column if not exists effort_level text not null default 'Médio';
 alter table public.demands enable row level security;
 grant all on table public.demands to service_role;
 alter table public.demand_staff enable row level security;
@@ -324,7 +326,7 @@ begin
   where demand_id in (select id from public.demands);
 
   insert into public.demands (
-    id, name, product_id, owner, status, priority, effort, actual_effort,
+    id, name, product_id, owner, status, priority, effort_level, effort, actual_effort,
     billable, billed_amount, progress, due, risk, type, origin, requester,
     version, artifact_number, artifact_url, description, notes, start_date, end_date, due_date, sort_order
   )
@@ -335,6 +337,7 @@ begin
     coalesce(item.value->>'owner', ''),
     coalesce(item.value->>'status', ''),
     coalesce(item.value->>'priority', ''),
+    coalesce(item.value->>'effortLevel', 'Médio'),
     coalesce(nullif(item.value->>'effort', '')::numeric, 0),
     nullif(item.value->>'actualEffort', '')::numeric,
     nullif(item.value->>'billable', '')::boolean,
@@ -368,6 +371,7 @@ begin
     owner = excluded.owner,
     status = excluded.status,
     priority = excluded.priority,
+    effort_level = excluded.effort_level,
     effort = excluded.effort,
     actual_effort = excluded.actual_effort,
     billable = excluded.billable,

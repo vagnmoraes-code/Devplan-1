@@ -69,6 +69,7 @@ type Demand = {
   owner: string;
   status: string;
   priority: string;
+  effortLevel?: string;
   effort: number;
   actualEffort?: number;
   billable?: boolean;
@@ -589,7 +590,7 @@ function DemandTable({ compact = false }: { compact?: boolean }) {
             <th>Produto</th>
             <th>Responsável</th>
             <th>Status</th>
-            <th>Prioridade</th>
+            <th>Impacto</th>
             <th>Esforço</th>
             <th>Prazo</th>
             <th>Risco</th>
@@ -621,9 +622,9 @@ function DemandTable({ compact = false }: { compact?: boolean }) {
                 </Badge>
               </td>
               <td>
-                <span className={"priority " + d.priority.toLowerCase()}>
+                <span className={"priority " + impactClass(demandImpact(d.priority))}>
                   <i />
-                  {d.priority}
+                  {demandImpact(d.priority)}
                 </span>
               </td>
               <td>{d.effort}h</td>
@@ -852,8 +853,8 @@ function Roadmap() {
                         {d.id} · {d.product} · {d.effort}h
                       </small>
                     </div>
-                    <Badge tone={d.priority === "Crítica" ? "bad" : "gray"}>
-                      {d.priority}
+                    <Badge tone={demandImpact(d.priority) === "Alto" ? "bad" : demandImpact(d.priority) === "Baixo" ? "good" : "gray"}>
+                      {demandImpact(d.priority)}
                     </Badge>
                     <I.Plus />
                   </button>
@@ -1015,7 +1016,7 @@ function RoadmapList({
               <th>Produto</th>
               <th>Colaboradores</th>
               <th>Status</th>
-              <th>Prioridade</th>
+              <th>Impacto</th>
               <th>Esforço</th>
               <th>Quarter</th>
               <th>Ação</th>
@@ -1040,7 +1041,7 @@ function RoadmapList({
                 <td>
                   <Badge>{d.status}</Badge>
                 </td>
-                <td>{d.priority}</td>
+                <td>{demandImpact(d.priority)}</td>
                 <td>{d.effort}h</td>
                 <td>
                   <select
@@ -1080,21 +1081,20 @@ const emptyDemandForm = {
   artifactUrl: "",
   origin: "Produto",
   requester: "",
-  priority: "Média",
+  priority: "Médio",
   status: "Backlog",
   progress: "0",
   due: "",
   startDate: "",
   endDate: "",
   effort: "40",
-  actualEffort: "",
+  effortLevel: "Médio",
   billable: "false",
   billedAmount: "",
   owner: "",
   notes: "",
   dependencies: "",
   justification: "",
-  impact: "",
   resourceIds: [] as number[],
   planningQuarter: "Planejamento",
 };
@@ -1104,6 +1104,8 @@ const displayDemandStatus = (status: string) => {
   if (["não iniciada", "nao iniciada", "não iniciado", "nao iniciado"].includes(normalized)) return "Não Iniciado";
   return status;
 };
+const demandImpact = (value: string) => value === "Baixo" || value === "Baixa" ? "Baixo" : value === "Alto" || value === "Alta" || value === "Crítica" ? "Alto" : "Médio";
+const impactClass = (impact: string) => impact === "Baixo" ? "baixo" : impact === "Alto" ? "alto" : "medio";
 function Demands() {
   const currentAccount = useCurrentAccount();
   const [q, setQ] = useState("");
@@ -1159,7 +1161,55 @@ function Demands() {
     }
     setForm({ ...form, [e.target.name]: e.target.value });
   };
-  const importExcel=async(e:React.ChangeEvent<HTMLInputElement>)=>{const file=e.target.files?.[0];if(!file)return;setImporting(true);setImportFeedback("");try{const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await file.arrayBuffer());const sheet=workbook.worksheets[0];if(!sheet)throw new Error("Planilha sem conteúdo");const headers:Record<number,string>={};sheet.getRow(1).eachCell((cell,col)=>{headers[col]=String(cell.text).trim().toLowerCase()});const imported:Demand[]=[];let ignored=0;const text=(row:ExcelJS.Row,names:string[])=>{const col=Object.entries(headers).find(([,header])=>names.includes(header))?.[0];return col?row.getCell(Number(col)).text.trim():""};const iso=(value:string)=>{if(!value)return "";const match=value.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);return match?`${match[3]}-${match[2].padStart(2,"0")}-${match[1].padStart(2,"0")}`: /^\d{4}-\d{2}-\d{2}$/.test(value)?value:""};sheet.eachRow((row,rowNumber)=>{if(rowNumber===1)return;const name=text(row,["demanda","título","titulo"]);const productText=text(row,["produto"]);const product=products.find((p)=>p.name.toLowerCase()===productText.toLowerCase()&&p.active);if(!name||!product){ignored++;return}const dueDate=iso(text(row,["prazo","prazo desejado","data fim","data de fim"]));const effort=Number(text(row,["capacidade estimada","esforço","esforco","horas"]).replace(",","."))||0;imported.push({id:newDemandId(),name,product:product.name,owner:product.coordinator.split(" ")[0],status:text(row,["status"])||"Backlog",priority:text(row,["prioridade"])||"Média",effort,progress:0,due:dueDate?new Date(dueDate+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short"}).replace(".",""):"Sem prazo",dueDate,startDate:iso(text(row,["data de início","data de inicio","início","inicio"])),risk:"Médio",type:text(row,["categoria","tipo"])||"Evolutiva",origin:text(row,["origem"])||"Produto",requester:text(row,["solicitante"]),version:text(row,["versão","versao"]),notes:text(row,["observações","observacoes"]),resourceIds:[]})});if(imported.length)setRows((current)=>[...imported,...current]);setImportFeedback(`${imported.length} demanda(s) importada(s)${ignored?` · ${ignored} linha(s) ignorada(s)`:""}.`)}catch{setImportFeedback("Não foi possível ler a planilha. Verifique o formato e os cabeçalhos.")}finally{setImporting(false);e.target.value=""}};
+  const importExcel=async(e:React.ChangeEvent<HTMLInputElement>)=>{
+    const file=e.target.files?.[0];if(!file)return;setImporting(true);setImportFeedback("");
+    try{
+      const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await file.arrayBuffer());
+      const sheet=workbook.worksheets[0];if(!sheet)throw new Error("Planilha sem conteúdo");
+      const headers:Record<number,string>={};sheet.getRow(1).eachCell((cell,col)=>{headers[col]=String(cell.text).trim().toLocaleLowerCase("pt-BR")});
+      const imported:Demand[]=[];const planned:{demandId:string;quarter:string;collaborators:string[];allocations:{staffId:number;hours:number}[]}[]=[];let ignored=0;
+      const findColumn=(names:string[])=>Object.entries(headers).find(([,header])=>names.includes(header))?.[0];
+      const raw=(row:ExcelJS.Row,names:string[])=>{const col=findColumn(names);return col?row.getCell(Number(col)).value:undefined};
+      const text=(row:ExcelJS.Row,names:string[])=>{const value=raw(row,names);if(value===undefined||value===null)return "";if(typeof value==="object"&&"text" in value)return String(value.text).trim();return String(value).trim()};
+      const numeric=(row:ExcelJS.Row,names:string[])=>{const value=raw(row,names);if(typeof value==="number")return value;const normalized=text(row,names).replace(/\s/g,"").replace(/\.(?=\d{3}(?:\D|$))/g,"").replace(",",".");return normalized?Number(normalized):undefined};
+      const iso=(row:ExcelJS.Row,names:string[])=>{const value=raw(row,names);if(value instanceof Date&&!Number.isNaN(value.getTime()))return `${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,"0")}-${String(value.getDate()).padStart(2,"0")}`;const source=text(row,names);if(!source)return "";const match=source.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);if(match){const date=new Date(Number(match[3]),Number(match[2])-1,Number(match[1]));return date.getFullYear()===Number(match[3])&&date.getMonth()===Number(match[2])-1&&date.getDate()===Number(match[1])?`${match[3]}-${match[2].padStart(2,"0")}-${match[1].padStart(2,"0")}`:""}const parsed=source.match(/^(\d{4})-(\d{2})-(\d{2})$/);if(parsed){const date=new Date(Number(parsed[1]),Number(parsed[2])-1,Number(parsed[3]));return date.getFullYear()===Number(parsed[1])&&date.getMonth()===Number(parsed[2])-1&&date.getDate()===Number(parsed[3])?source:""}return ""};
+      sheet.eachRow((row,rowNumber)=>{
+        if(rowNumber===1)return;
+        let hasContent=false;row.eachCell((cell)=>{if(cell.value!==null&&cell.value!==undefined&&cell.text.trim()!=="")hasContent=true});if(!hasContent)return;
+        const name=text(row,["título *","título","titulo *","titulo","demanda"]);
+        const productText=text(row,["produto *","produto"]);
+        const product=products.find((item)=>item.name.toLocaleLowerCase("pt-BR")===productText.toLocaleLowerCase("pt-BR")&&item.active);
+        const category=text(row,["categoria *","categoria","tipo"]);
+        const effort=numeric(row,["esforço estimado (horas)","esforco estimado (horas)","capacidade estimada","horas"]);
+        const effortLevel=text(row,["esforço","esforco","nível de esforço","nivel de esforco"]);
+        const startDate=iso(row,["data de início","data de inicio","início","inicio"]);
+        const endDate=iso(row,["data de término","data de termino","término","termino"]);
+        const dueDate=iso(row,["prazo desejado","prazo","data fim","data de fim"]);
+        const artifactUrl=text(row,["link do artefato","url do artefato","link"]);
+        const quarter=text(row,["quarter desejado","quarter","trimestre"]);
+        if(!name||!product||!category||!Number.isFinite(effort)||Number(effort)<=0||(startDate&&endDate&&endDate<startDate)||(artifactUrl&&!/^https?:\/\//i.test(artifactUrl))){ignored++;return}
+        const id=newDemandId();
+        const billableText=text(row,["faturamento","faturável","faturavel"]).toLocaleLowerCase("pt-BR");
+        const billable=["sim","true","sim, faturável","faturável","faturavel"].includes(billableText);
+        const billedAmount=numeric(row,["valor faturado (r$)","valor faturado","valor"]);
+        const actualEffort=numeric(row,["esforço realizado (horas)","esforco realizado (horas)","esforço realizado","esforco realizado"]);
+        const owner=text(row,["responsável","responsavel"])||product.coordinator.split(" ")[0];
+        const status=text(row,["status"])||"Backlog";
+        imported.push({
+          id,name,product:product.name,owner,status,priority:text(row,["impacto","prioridade"])||"Médio",effortLevel:effortLevel||"Médio",effort:Number(effort),
+          actualEffort:Number.isFinite(actualEffort)?actualEffort:undefined,billable,billedAmount:billable&&Number.isFinite(billedAmount)?billedAmount:0,
+          progress:0,due:dueDate?new Date(dueDate+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short"}).replace(".",""):"Sem prazo",dueDate,
+          startDate,endDate,risk:status==="Bloqueado"?"Alto":"Médio",type:category,origin:text(row,["origem"])||"Produto",
+          requester:text(row,["solicitante"]),artifactNumber:text(row,["número do artefato","numero do artefato","artefato"]),artifactUrl,
+          description:text(row,["descrição","descricao"]),notes:text(row,["observação","observacao","observações","observacoes"]),resourceIds:[],
+        });
+        if(quarter&&quarter!=="Planejamento"&&quarters.includes(quarter))planned.push({demandId:id,quarter,collaborators:[],allocations:[]});
+      });
+      if(imported.length)setRows((current)=>[...imported,...current]);
+      if(planned.length){setRoadmap(current=>[...current,...planned]);setHistory(current=>[...planned.map(item=>({id:Date.now()+Math.random(),date:new Date().toLocaleString("pt-BR"),title:"Demanda planejada via importação",actor:currentAccount?.name??"Conta ativa",detail:`${item.demandId} incluída em ${item.quarter}`,tone:"good" as const,quarter:item.quarter})),...current]);}
+      setImportFeedback(`${imported.length} demanda(s) importada(s)${ignored?` · ${ignored} linha(s) ignorada(s) por dados obrigatórios ou inválidos`:""}.`);
+    }catch{setImportFeedback("Não foi possível ler a planilha. Verifique o formato e os cabeçalhos.")}finally{setImporting(false);e.target.value=""}
+  };
   const close = () => {
     setModal(false);
     setEditing(null);
@@ -1193,7 +1243,8 @@ function Demands() {
       ...emptyDemandForm,
       name: d.name,
       product: d.product,
-      priority: d.priority,
+      priority: demandImpact(d.priority),
+      effortLevel: d.effortLevel || "Médio",
       status: displayDemandStatus(d.status),
       progress: String(d.progress),
       type: d.type || "Evolutiva",
@@ -1203,7 +1254,6 @@ function Demands() {
       description: d.description || "",
       notes: d.notes || "",
       effort: String(d.effort),
-      actualEffort: d.actualEffort === undefined ? "" : String(d.actualEffort),
       billable: String(d.billable ?? false),
       billedAmount: d.billedAmount === undefined ? "" : String(d.billedAmount),
       owner: d.owner,
@@ -1226,7 +1276,6 @@ function Demands() {
     if (Number(form.effort) <= 0) next.effort = "Informe um esforço válido.";
     if (form.startDate && form.endDate && form.endDate < form.startDate) next.endDate = "A data de término deve ser igual ou posterior à data de início.";
     if (form.artifactUrl.trim() && !/^https?:\/\//i.test(form.artifactUrl.trim())) next.artifactUrl = "Informe um link iniciado por http:// ou https://.";
-    if (form.actualEffort !== "" && (!Number.isFinite(Number(form.actualEffort)) || Number(form.actualEffort) < 0)) next.actualEffort = "Informe um esforço realizado válido.";
     const billedAmount = Number(form.billedAmount);
     if (form.billable === "true" && (!Number.isFinite(billedAmount) || billedAmount < 0 || Math.abs(billedAmount * 100 - Math.round(billedAmount * 100)) > 0.000001)) next.billedAmount = "Informe um valor não negativo com até duas casas decimais.";
     setErrors(next);
@@ -1242,14 +1291,15 @@ function Demands() {
       owner: form.owner.trim() || "",
       status: form.status,
       priority: form.priority,
+      effortLevel: form.effortLevel,
       effort: Number(form.effort),
-      actualEffort: form.actualEffort === "" ? undefined : Number(form.actualEffort),
+      actualEffort: editing?.actualEffort,
       billable: form.billable === "true",
       billedAmount: form.billable === "true" ? Math.round(billedAmount * 100) / 100 : 0,
       progress: editing?.progress ?? 0,
       due,
       dueDate: form.due,
-      risk: form.priority === "Crítica" ? "Alto" : editing?.risk || "Médio",
+      risk: form.priority === "Alto" ? "Alto" : editing?.risk || "Médio",
       type: form.type,
       origin: form.origin,
       requester: form.requester.trim(),
@@ -1373,13 +1423,14 @@ function Demands() {
             </div>
             <div className="demand-summary-grid">
               <div><span>Status</span><b>{viewing.status}</b></div>
-              <div><span>Prioridade</span><b>{viewing.priority}</b></div>
+              <div><span>Impacto</span><b>{demandImpact(viewing.priority)}</b></div>
               <div><span>Categoria</span><b>{viewing.type || "Não informada"}</b></div>
               <div><span>Responsável</span><b>{viewing.owner}</b></div>
               <div><span>Data de início</span><b>{viewing.startDate ? new Date(viewing.startDate + "T12:00:00").toLocaleDateString("pt-BR") : "Não informada"}</b></div>
               <div><span>Data de término</span><b>{viewing.endDate ? new Date(viewing.endDate + "T12:00:00").toLocaleDateString("pt-BR") : "Não informada"}</b></div>
               <div><span>Prazo desejado</span><b>{viewing.dueDate ? new Date(viewing.dueDate + "T12:00:00").toLocaleDateString("pt-BR") : viewing.due}</b></div>
-              <div><span>Esforço estimado</span><b>{viewing.effort}h</b></div>
+              <div><span>Esforço</span><b>{viewing.effortLevel || "Médio"}</b></div>
+              <div><span>Esforço estimado (horas)</span><b>{viewing.effort}h</b></div>
               <div><span>Esforço realizado</span><b>{viewing.actualEffort === undefined ? "Não informado" : `${viewing.actualEffort}h`}</b></div>
               <div><span>Evolução</span><b>{viewing.progress}%</b></div>
               <div><span>Quarter</span><b>{roadmap.find((item) => item.demandId === viewing.id)?.quarter || "Planejamento"}</b></div>
@@ -1458,14 +1509,14 @@ function Demands() {
               <div className="form-field"><label htmlFor="requester">Solicitante <span className="optional-label">Opcional</span></label><input id="requester" name="requester" value={form.requester} onChange={change} placeholder="Nome de quem solicitou"/></div>
               <div className="form-field"><label htmlFor="artifactNumber">Número do artefato</label><input id="artifactNumber" name="artifactNumber" value={form.artifactNumber} onChange={change} placeholder="Ex.: 12345"/></div>
               <div className="form-field"><label htmlFor="artifactUrl">Link do artefato</label><div className="input-with-icon"><I.ExternalLink/><input id="artifactUrl" name="artifactUrl" type="url" value={form.artifactUrl} onChange={change} placeholder="https://..." className={errors.artifactUrl ? "invalid" : ""}/></div>{errors.artifactUrl && <small className="field-error">{errors.artifactUrl}</small>}</div>
-              <div className="form-field"><label htmlFor="demandPriority">Prioridade</label><select id="demandPriority" name="priority" value={form.priority} onChange={change}><option>Baixa</option><option>Média</option><option>Alta</option><option>Crítica</option></select></div>
+              <div className="form-field"><label htmlFor="demandPriority">Impacto</label><select id="demandPriority" name="priority" value={form.priority} onChange={change}><option>Baixo</option><option>Médio</option><option>Alto</option></select></div>
               <div className="form-field"><label htmlFor="demandStatus">Status</label><select id="demandStatus" name="status" value={form.status} onChange={change}><option>Não Iniciado</option><option>Backlog</option><option>Planejado</option><option>Em análise</option><option>Em Estudos</option><option>Em Desenvolvimento</option><option>Concluído</option><option>Cancelado</option><option>Bloqueado</option></select></div>
               {!editing && <div className="form-field wide"><label htmlFor="planningQuarter">Quarter desejado</label><select id="planningQuarter" name="planningQuarter" value={form.planningQuarter} onChange={change}><option value="Planejamento">Deixar em planejamento</option>{quarters.map((quarter)=><option key={quarter}>{quarter}</option>)}</select><small className="resource-help">O quarter define em qual período a demanda entra no roadmap.</small></div>}
               <div className="form-field"><label htmlFor="startDate">Data de início</label><input id="startDate" type="date" name="startDate" value={form.startDate} onChange={change}/></div>
               <div className="form-field"><label htmlFor="endDate">Data de término</label><input id="endDate" type="date" name="endDate" min={form.startDate || undefined} value={form.endDate} onChange={change} className={errors.endDate ? "invalid" : ""}/>{errors.endDate && <small className="field-error">{errors.endDate}</small>}</div>
               <div className="form-field wide"><label htmlFor="due">Prazo desejado <span className="optional-label">Opcional</span></label><input id="due" type="date" name="due" value={form.due} onChange={change}/></div>
-              <div className="form-field"><label htmlFor="effort">Esforço estimado (horas)</label><input id="effort" type="number" min="1" name="effort" required value={form.effort} onChange={change} className={errors.effort ? "invalid" : ""}/>{errors.effort && <small className="field-error">{errors.effort}</small>}</div>
-              <div className="form-field"><label htmlFor="actualEffort">Esforço realizado (horas)</label><input id="actualEffort" type="number" min="0" step="0.5" name="actualEffort" value={form.actualEffort} onChange={change} placeholder="Ainda não informado" className={errors.actualEffort ? "invalid" : ""}/>{errors.actualEffort && <small className="field-error">{errors.actualEffort}</small>}</div>
+              <div className="form-field"><label htmlFor="effortLevel">Esforço</label><select id="effortLevel" name="effortLevel" value={form.effortLevel} onChange={change}><option>Alto</option><option>Médio</option><option>Baixo</option></select></div>
+              <div className="form-field"><label htmlFor="effort">Esforço Estimado (Horas)</label><input id="effort" type="number" min="1" step="0.5" name="effort" required value={form.effort} onChange={change} className={errors.effort ? "invalid" : ""}/>{errors.effort && <small className="field-error">{errors.effort}</small>}</div>
               <div className="form-field"><label htmlFor="billable">Faturamento</label><select id="billable" name="billable" value={form.billable} onChange={change}><option value="false">Não faturável</option><option value="true">Faturável</option></select></div>
               <div className="form-field"><label htmlFor="billedAmount">Valor faturado (R$)</label><input id="billedAmount" name="billedAmount" type="number" min="0" step="0.01" value={form.billedAmount} onChange={change} disabled={form.billable !== "true"} placeholder="0,00" className={errors.billedAmount ? "invalid" : ""}/>{errors.billedAmount && <small className="field-error" role="alert">{errors.billedAmount}</small>}</div>
               <section className="form-field wide resource-picker-field" aria-label="Recursos da demanda">
@@ -1575,7 +1626,7 @@ function DemandTableRows({
             <th>Produto</th>
             <th>Responsável</th>
             <th>Status</th>
-            <th>Prioridade</th>
+            <th>Impacto</th>
             <th>Progresso</th>
             <th>Prazo</th>
             <th>Risco</th>
@@ -1608,7 +1659,7 @@ function DemandTableRows({
                   {status}
                 </Badge>
               </td>
-              <td>{d.priority}</td>
+              <td>{demandImpact(d.priority)}</td>
               <td>
                 <div className="mini">
                   <i style={{ width: d.progress + "%" }} />
@@ -2333,7 +2384,7 @@ function Planning() {
       {hasFilters && <button className="ghost" onClick={() => { setProductFilter("Todos"); setQuarterFilter("Todos"); setStatusFilter("Todos"); }}><I.X /> Limpar filtros</button>}
       <span role="status">{filtered.length} de {rows.length} demandas</span>
     </div>
-    {filtered.length ? <Card><div className="tablewrap planning-table-wrap"><table className="planning-table"><thead><tr><th>ID</th><th>Demanda</th><th>Produto</th><th>Quarter</th><th>Responsável</th><th>Prioridade</th><th>Prazo</th><th>Status</th><th>Esforço</th><th>Evolução</th></tr></thead><tbody>
+    {filtered.length ? <Card><div className="tablewrap planning-table-wrap"><table className="planning-table"><thead><tr><th>ID</th><th>Demanda</th><th>Produto</th><th>Quarter</th><th>Responsável</th><th>Impacto</th><th>Prazo</th><th>Status</th><th>Esforço estimado (horas)</th><th>Evolução</th></tr></thead><tbody>
       {filtered.map(demand => {
         const progress = Math.min(100, Math.max(0, demand.progress || 0));
         const status = displayDemandStatus(demand.status);
@@ -2341,7 +2392,7 @@ function Planning() {
         const blocked = status === "Bloqueada";
         const due = demand.dueDate ? new Date(`${demand.dueDate}T12:00:00`).toLocaleDateString("pt-BR") : demand.due || "Sem prazo";
         return <tr className={completed ? "planning-row-completed" : blocked ? "planning-row-blocked" : progress > 0 ? "planning-row-active" : "planning-row-pending"} key={demand.id}>
-          <td>{demand.id}</td><td><b>{demand.name}</b></td><td>{demand.product}</td><td>{quarterFor(demand)}</td><td>{demand.owner || "Não informado"}</td><td>{demand.priority}</td><td>{due}</td><td><Badge tone={completed ? "good" : blocked ? "bad" : "blue"}>{status}</Badge></td><td>{demand.effort}h</td><td><div className="planning-row-progress"><progress max="100" value={progress} aria-label={`Evolução de ${demand.name}`} /><b>{progress}%</b></div></td>
+          <td>{demand.id}</td><td><b>{demand.name}</b></td><td>{demand.product}</td><td>{quarterFor(demand)}</td><td>{demand.owner || "Não informado"}</td><td>{demandImpact(demand.priority)}</td><td>{due}</td><td><Badge tone={completed ? "good" : blocked ? "bad" : "blue"}>{status}</Badge></td><td>{demand.effort}h</td><td><div className="planning-row-progress"><progress max="100" value={progress} aria-label={`Evolução de ${demand.name}`} /><b>{progress}%</b></div></td>
         </tr>;
       })}
     </tbody></table></div></Card> : <Card><div className="planning-empty"><I.ListTodo aria-hidden="true" /><b>{rows.length ? "Nenhuma demanda encontrada" : "Nenhuma demanda cadastrada"}</b><p>{rows.length ? "Altere ou limpe os filtros para visualizar outras demandas." : "Cadastre demandas na Gestão de demandas para acompanhar o planejamento."}</p></div></Card>}
