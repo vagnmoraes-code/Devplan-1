@@ -1418,6 +1418,8 @@ function Demands() {
           onEdit={openEdit}
           onQuickEdit={openQuickEdit}
           onRemove={setRemoving}
+          showRecordId={false}
+          showRisk={false}
         />
       </Card>
       {viewing && (
@@ -1616,12 +1618,16 @@ function DemandTableRows({
   onEdit,
   onQuickEdit,
   onRemove,
+  showRecordId = true,
+  showRisk = true,
 }: {
   rows: Demand[];
   onView?: (d: Demand) => void;
   onEdit?: (d: Demand) => void;
   onQuickEdit?: (d: Demand) => void;
   onRemove?: (d: Demand) => void;
+  showRecordId?: boolean;
+  showRisk?: boolean;
 }) {
   return (
     <div className="tablewrap">
@@ -1635,7 +1641,7 @@ function DemandTableRows({
             <th>Impacto</th>
             <th>Progresso</th>
             <th>Prazo</th>
-            <th>Risco</th>
+            {showRisk && <th>Risco</th>}
             {onEdit && <th className="actions-head">Ações</th>}
           </tr>
         </thead>
@@ -1645,7 +1651,7 @@ function DemandTableRows({
             return <tr key={d.id}>
               <td>
                 {onView ? <button className="demand-title-button" onClick={() => onView(d)}>{d.name}</button> : <b>{d.name}</b>}
-                <small>{d.id}</small>
+                {showRecordId && <small>{d.id}</small>}
               </td>
               <td>{d.product}</td>
               <td>
@@ -1673,7 +1679,7 @@ function DemandTableRows({
                 <small>{d.progress}%</small>
               </td>
               <td>{d.due}</td>
-              <td>
+              {showRisk && <td>
                 <Badge
                   tone={
                     d.risk === "Crítico"
@@ -1687,7 +1693,7 @@ function DemandTableRows({
                 >
                   {d.risk}
                 </Badge>
-              </td>
+              </td>}
               {onEdit && (
                 <td>
                   <div className="row-actions">
