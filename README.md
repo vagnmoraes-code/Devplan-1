@@ -32,7 +32,7 @@ No Supabase, aplique `scripts/supabase-schema.sql` pelo SQL Editor antes de publ
 - Simulação dinâmica de cenários e impacto
 - Matriz de riscos, central de mudanças e relatórios
 - Busca global com `Ctrl + K`
-- Tema claro/escuro e layout responsivo
+- Tema claro/escuro e layout responsivoo
 
 Os dados são fictícios e ficam no front-end, deixando a interface pronta para uma futura camada de serviços/API.
 
