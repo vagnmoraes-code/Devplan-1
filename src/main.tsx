@@ -86,11 +86,8 @@ type Demand = {
   dueDate?: string;
   resourceIds?: number[];
 };
-function nextDemandId(rows: Demand[]) {
-  const existingIds = new Set(rows.map(row => row.id));
-  let sequence = 160;
-  while (existingIds.has(`DEV-${sequence}`)) sequence += 1;
-  return `DEV-${sequence}`;
+function newDemandId() {
+  return `DEV-${crypto.randomUUID()}`;
 }
 type InitiativeStatus = "Não iniciada" | "Em andamento" | "Concluída" | "Bloqueada";
 type Initiative = { id: string; name: string; status: InitiativeStatus; startDate: string; endDate: string; owner: string; observation: string; progress: number };
@@ -684,7 +681,7 @@ function Roadmap() {
   const pickerProducts = products.filter(product => product.active).map(product => product.name);
   const openPicker = () => { setPickerProduct(productFilter === "Todos" ? "" : productFilter); setPicker(true); };
   const months = quarterMonths[quarter.slice(0, 2)];
-  const register=(title:string,detail:string,tone:ChangeLog["tone"]="blue",eventQuarter?:string)=>{const demandId=detail.match(/DEV-\d+/)?.[0];const demand=rows.find((d)=>d.id===demandId);setHistory((current)=>[{id:Date.now(),date:new Date().toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}),title,actor:currentAccount?.name??"Usuário",detail,tone,product:demand?.product,quarter:eventQuarter,demandId,demandName:demand?.name},...current])};
+  const register=(title:string,detail:string,tone:ChangeLog["tone"]="blue",eventQuarter?:string)=>{const demandId=detail.match(/DEV-[A-Za-z0-9-]+/)?.[0];const demand=rows.find((d)=>d.id===demandId);setHistory((current)=>[{id:Date.now(),date:new Date().toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}),title,actor:currentAccount?.name??"Usuário",detail,tone,product:demand?.product,quarter:eventQuarter,demandId,demandName:demand?.name},...current])};
   const createVersion = () => {
     const entries = roadmap.filter((entry) => entry.quarter === quarter);
     const demandIds = new Set(entries.map((entry) => entry.demandId));
@@ -1153,7 +1150,7 @@ function Demands() {
     }
     setForm({ ...form, [e.target.name]: e.target.value });
   };
-  const importExcel=async(e:React.ChangeEvent<HTMLInputElement>)=>{const file=e.target.files?.[0];if(!file)return;setImporting(true);setImportFeedback("");try{const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await file.arrayBuffer());const sheet=workbook.worksheets[0];if(!sheet)throw new Error("Planilha sem conteúdo");const headers:Record<number,string>={};sheet.getRow(1).eachCell((cell,col)=>{headers[col]=String(cell.text).trim().toLowerCase()});const imported:Demand[]=[];let ignored=0;const text=(row:ExcelJS.Row,names:string[])=>{const col=Object.entries(headers).find(([,header])=>names.includes(header))?.[0];return col?row.getCell(Number(col)).text.trim():""};const iso=(value:string)=>{if(!value)return "";const match=value.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);return match?`${match[3]}-${match[2].padStart(2,"0")}-${match[1].padStart(2,"0")}`: /^\d{4}-\d{2}-\d{2}$/.test(value)?value:""};const nextId=Math.max(...rows.map((d)=>Number(d.id.replace(/\D/g,""))||0),159)+1;sheet.eachRow((row,rowNumber)=>{if(rowNumber===1)return;const name=text(row,["demanda","título","titulo"]);const productText=text(row,["produto"]);const product=products.find((p)=>p.name.toLowerCase()===productText.toLowerCase()&&p.active);if(!name||!product){ignored++;return}const dueDate=iso(text(row,["prazo","prazo desejado","data fim","data de fim"]));const effort=Number(text(row,["capacidade estimada","esforço","esforco","horas"]).replace(",","."))||0;imported.push({id:`DEV-${nextId+imported.length}`,name,product:product.name,owner:product.coordinator.split(" ")[0],status:text(row,["status"])||"Backlog",priority:text(row,["prioridade"])||"Média",effort,progress:0,due:dueDate?new Date(dueDate+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short"}).replace(".",""):"Sem prazo",dueDate,startDate:iso(text(row,["data de início","data de inicio","início","inicio"])),risk:"Médio",type:text(row,["categoria","tipo"])||"Evolutiva",origin:text(row,["origem"])||"Produto",requester:text(row,["solicitante"]),version:text(row,["versão","versao"]),notes:text(row,["observações","observacoes"]),resourceIds:[]})});if(imported.length)setRows((current)=>[...imported,...current]);setImportFeedback(`${imported.length} demanda(s) importada(s)${ignored?` · ${ignored} linha(s) ignorada(s)`:""}.`)}catch{setImportFeedback("Não foi possível ler a planilha. Verifique o formato e os cabeçalhos.")}finally{setImporting(false);e.target.value=""}};
+  const importExcel=async(e:React.ChangeEvent<HTMLInputElement>)=>{const file=e.target.files?.[0];if(!file)return;setImporting(true);setImportFeedback("");try{const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await file.arrayBuffer());const sheet=workbook.worksheets[0];if(!sheet)throw new Error("Planilha sem conteúdo");const headers:Record<number,string>={};sheet.getRow(1).eachCell((cell,col)=>{headers[col]=String(cell.text).trim().toLowerCase()});const imported:Demand[]=[];let ignored=0;const text=(row:ExcelJS.Row,names:string[])=>{const col=Object.entries(headers).find(([,header])=>names.includes(header))?.[0];return col?row.getCell(Number(col)).text.trim():""};const iso=(value:string)=>{if(!value)return "";const match=value.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);return match?`${match[3]}-${match[2].padStart(2,"0")}-${match[1].padStart(2,"0")}`: /^\d{4}-\d{2}-\d{2}$/.test(value)?value:""};sheet.eachRow((row,rowNumber)=>{if(rowNumber===1)return;const name=text(row,["demanda","título","titulo"]);const productText=text(row,["produto"]);const product=products.find((p)=>p.name.toLowerCase()===productText.toLowerCase()&&p.active);if(!name||!product){ignored++;return}const dueDate=iso(text(row,["prazo","prazo desejado","data fim","data de fim"]));const effort=Number(text(row,["capacidade estimada","esforço","esforco","horas"]).replace(",","."))||0;imported.push({id:newDemandId(),name,product:product.name,owner:product.coordinator.split(" ")[0],status:text(row,["status"])||"Backlog",priority:text(row,["prioridade"])||"Média",effort,progress:0,due:dueDate?new Date(dueDate+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short"}).replace(".",""):"Sem prazo",dueDate,startDate:iso(text(row,["data de início","data de inicio","início","inicio"])),risk:"Médio",type:text(row,["categoria","tipo"])||"Evolutiva",origin:text(row,["origem"])||"Produto",requester:text(row,["solicitante"]),version:text(row,["versão","versao"]),notes:text(row,["observações","observacoes"]),resourceIds:[]})});if(imported.length)setRows((current)=>[...imported,...current]);setImportFeedback(`${imported.length} demanda(s) importada(s)${ignored?` · ${ignored} linha(s) ignorada(s)`:""}.`)}catch{setImportFeedback("Não foi possível ler a planilha. Verifique o formato e os cabeçalhos.")}finally{setImporting(false);e.target.value=""}};
   const close = () => {
     setModal(false);
     setEditing(null);
@@ -1224,7 +1221,7 @@ function Demands() {
       .toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })
       .replace(".", "");
     const data: Demand = {
-      id: editing?.id || nextDemandId(rows),
+      id: editing?.id || newDemandId(),
       name: form.name.trim(),
       product: form.product,
       owner: form.owner.trim() || "",
