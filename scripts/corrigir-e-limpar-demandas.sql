@@ -1,6 +1,10 @@
--- Repara replace_portal_demands e limpa demandas/planejamentos, preservando capacidades.
+-- Corrige replace_portal_demands, adiciona os campos do formul?rio e limpa demandas relacionadas.
 -- Feche as abas do portal antes de executar para evitar que uma sess?o antiga regrave os dados.
 begin;
+
+alter table public.demands add column if not exists artifact_url text;
+alter table public.demands add column if not exists description text;
+alter table public.demands add column if not exists end_date text;
 
 create or replace function public.replace_portal_demands(p_records jsonb)
 returns void
@@ -81,7 +85,7 @@ begin
   insert into public.demands (
     id, name, product_id, owner, status, priority, effort, actual_effort,
     billable, billed_amount, progress, due, risk, type, origin, requester,
-    version, artifact_number, notes, start_date, due_date, sort_order
+    version, artifact_number, artifact_url, description, notes, start_date, end_date, due_date, sort_order
   )
   select
     item.value->>'id',
@@ -102,8 +106,11 @@ begin
     item.value->>'requester',
     item.value->>'version',
     item.value->>'artifactNumber',
+    item.value->>'artifactUrl',
+    item.value->>'description',
     item.value->>'notes',
     item.value->>'startDate',
+    item.value->>'endDate',
     item.value->>'dueDate',
     (item.ordinality - 1)::integer
   from jsonb_array_elements(p_records) with ordinality as item(value, ordinality)
@@ -132,8 +139,11 @@ begin
     requester = excluded.requester,
     version = excluded.version,
     artifact_number = excluded.artifact_number,
+    artifact_url = excluded.artifact_url,
+    description = excluded.description,
     notes = excluded.notes,
     start_date = excluded.start_date,
+    end_date = excluded.end_date,
     due_date = excluded.due_date,
     sort_order = excluded.sort_order;
 

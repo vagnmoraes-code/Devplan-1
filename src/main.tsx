@@ -81,8 +81,11 @@ type Demand = {
   requester?: string;
   version?: string;
   artifactNumber?: string;
+  artifactUrl?: string;
+  description?: string;
   notes?: string;
   startDate?: string;
+  endDate?: string;
   dueDate?: string;
   resourceIds?: number[];
 };
@@ -560,12 +563,12 @@ function ExecutiveView() {
   const scoped = product === "Todos" ? rows : rows.filter((demand) => demand.product === product);
   const isDone = (demand: Demand) => demand.progress === 100 || ["Concluído", "Concluída"].includes(demand.status);
   const delivered = scoped.filter(isDone);
-  const overlapsWeek = (demand: Demand) => Boolean(demand.startDate && demand.dueDate && demand.startDate <= end && demand.dueDate >= start);
+  const overlapsWeek = (demand: Demand) => Boolean(demand.startDate && (demand.endDate || demand.dueDate) && demand.startDate <= end && (demand.endDate || demand.dueDate || "") >= start);
   const planned = scoped.filter((demand) => !isDone(demand) && overlapsWeek(demand) && (demand.progress === 0 || ["Backlog", "Planejado"].includes(demand.status)));
   const plannedIds = new Set(planned.map((demand) => demand.id));
   const executing = scoped.filter((demand) => !isDone(demand) && overlapsWeek(demand) && !plannedIds.has(demand.id));
   const format = (date: Date) => date.toLocaleDateString("pt-BR", {day:"2-digit",month:"short"}).replace(".","");
-  const DemandExecutiveCard = ({ demand }: { demand: Demand }) => <div className="executive-demand"><div><b>{demand.name}</b><small>{demand.id} · {demand.product}</small></div><div><span>{demand.progress}%</span><div className="mini"><i style={{width:`${demand.progress}%`}}/></div></div><footer><span><I.CalendarDays/>{demand.startDate ? new Date(demand.startDate+"T12:00:00").toLocaleDateString("pt-BR") : "Sem início"} — {demand.dueDate ? new Date(demand.dueDate+"T12:00:00").toLocaleDateString("pt-BR") : "Sem prazo"}</span><Badge tone={demand.status.includes("Bloqueada")?"bad":"blue"}>{demand.status}</Badge></footer></div>;
+  const DemandExecutiveCard = ({ demand }: { demand: Demand }) => { const endDate = demand.endDate || demand.dueDate; return <div className="executive-demand"><div><b>{demand.name}</b><small>{demand.id} · {demand.product}</small></div><div><span>{demand.progress}%</span><div className="mini"><i style={{width:`${demand.progress}%`}}/></div></div><footer><span><I.CalendarDays/>{demand.startDate ? new Date(demand.startDate+"T12:00:00").toLocaleDateString("pt-BR") : "Sem início"} — {endDate ? new Date(endDate+"T12:00:00").toLocaleDateString("pt-BR") : "Sem término"}</span><Badge tone={demand.status.includes("Bloqueada")?"bad":"blue"}>{demand.status}</Badge></footer></div>; };
   return <><PageHead title="Visão executiva" desc="Acompanhe entregas e compromissos semanais do time."/>
     <div className="executive-controls"><div><I.CalendarRange/><span><b>Semana acompanhada</b><small>{format(monday)} a {format(sunday)}</small></span></div><div className="week-navigation"><button onClick={()=>setWeekOffset((value)=>value-1)} title="Semana anterior"><I.ChevronLeft/></button><button onClick={()=>setWeekOffset(0)}>Semana atual</button><button onClick={()=>setWeekOffset((value)=>value+1)} title="Próxima semana"><I.ChevronRight/></button></div><label><I.Boxes/><span>Produto</span><select value={product} onChange={(e)=>setProduct(e.target.value)}><option value="Todos">Todos os produtos</option>{products.filter((item)=>item.active).map((item)=><option key={item.id}>{item.name}</option>)}</select></label></div>
     <div className="kpis compact"><Card><span>Entregues</span><strong>{delivered.length}</strong><small>em todo o histórico</small></Card><Card><span>Em execução</span><strong>{executing.length}</strong><small>na semana selecionada</small></Card><Card><span>Planejadas</span><strong>{planned.length}</strong><small>na semana selecionada</small></Card><Card><span>Esforço semanal</span><strong>{[...executing,...planned].reduce((sum,demand)=>sum+demand.effort,0)}h</strong><small>{product==="Todos"?"todos os produtos":product}</small></Card></div>
@@ -938,7 +941,7 @@ function Timeline({
   const quarterStart=new Date(Number(yearText),quarterIndex*3,1).getTime();
   const quarterEnd=new Date(Number(yearText),quarterIndex*3+3,0,23,59,59).getTime();
   const span=quarterEnd-quarterStart;
-  const position=(d:Demand)=>{const start=Math.max(quarterStart,new Date(`${d.startDate || `${yearText}-${String(quarterIndex*3+1).padStart(2,"0")}-01`}T12:00:00`).getTime());const end=Math.min(quarterEnd,new Date(`${d.dueDate || d.startDate || `${yearText}-${String(quarterIndex*3+3).padStart(2,"0")}-28`}T12:00:00`).getTime());const left=Math.max(0,Math.min(100,(start-quarterStart)/span*100));const width=Math.max(4,Math.min(100-left,(end-start)/span*100));return {left:`${left}%`,width:`${width}%`}};
+  const position=(d:Demand)=>{const start=Math.max(quarterStart,new Date(`${d.startDate || `${yearText}-${String(quarterIndex*3+1).padStart(2,"0")}-01`}T12:00:00`).getTime());const end=Math.min(quarterEnd,new Date(`${d.endDate || d.dueDate || d.startDate || `${yearText}-${String(quarterIndex*3+3).padStart(2,"0")}-28`}T12:00:00`).getTime());const left=Math.max(0,Math.min(100,(start-quarterStart)/span*100));const width=Math.max(4,Math.min(100-left,(end-start)/span*100));return {left:`${left}%`,width:`${width}%`}};
   return (
     <Card>
       <div className="timeline">
@@ -1074,6 +1077,7 @@ const emptyDemandForm = {
   type: "Evolutiva",
   version: "",
   artifactNumber: "",
+  artifactUrl: "",
   origin: "Produto",
   requester: "",
   priority: "Média",
@@ -1081,11 +1085,13 @@ const emptyDemandForm = {
   progress: "0",
   due: "",
   startDate: "",
+  endDate: "",
   effort: "40",
   actualEffort: "",
   billable: "false",
   billedAmount: "",
   owner: "",
+  notes: "",
   dependencies: "",
   justification: "",
   impact: "",
@@ -1114,6 +1120,7 @@ function Demands() {
   const [viewing, setViewing] = useState<Demand | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [form, setForm] = useState(emptyDemandForm);
+  const [resourceQuery, setResourceQuery] = useState("");
   const fileRef=useRef<HTMLInputElement>(null);
   const [importing,setImporting]=useState(false);
   const [importFeedback,setImportFeedback]=useState("");
@@ -1123,13 +1130,14 @@ function Demands() {
   const [statusFilter,setStatusFilter]=useState("Todos");
   const selectedProduct = products.find((product) => product.name === form.product);
   const availableResources = team.filter((person) => person.active !== false && person.product === form.product);
+  const filteredResources = availableResources.filter((person) => person.name.toLocaleLowerCase("pt-BR").includes(resourceQuery.toLocaleLowerCase("pt-BR")));
   const statusOptions=Array.from(new Set([...rows.map((d)=>displayDemandStatus(d.status)), "Não Iniciado"])).filter((status)=>status!=="Em Andamento").sort((a,b)=>a.localeCompare(b,"pt-BR"));
   const now=new Date();
   const today=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
   const filtered = rows.filter((d) => {
     const planning=roadmap.find((item)=>item.demandId===d.id);
     const matchesQuarter=quarterFilter==="Todos"||(quarterFilter==="Planejamento"?!planning:planning?.quarter===quarterFilter);
-    const runningToday=Boolean(d.startDate&&d.dueDate&&d.startDate<=today&&d.dueDate>=today);
+  const runningToday=Boolean(d.startDate&&(d.endDate||d.dueDate)&&d.startDate<=today&&(d.endDate||d.dueDate||"")>=today);
     return (d.name+d.id+d.product).toLowerCase().includes(q.toLowerCase())&&(productFilter==="Todos"||d.product===productFilter)&&matchesQuarter&&(executionFilter==="Todas"||runningToday)&&(statusFilter==="Todos"||displayDemandStatus(d.status)===statusFilter);
   }).sort((a,b)=>{
     const rank=(status:string)=>({"Concluído":0,"Concluída":0,"Em Desenvolvimento":1,"Não Iniciado":2}[displayDemandStatus(status)]??3);
@@ -1142,6 +1150,7 @@ function Demands() {
   ) => {
     if (e.target.name === "product") {
       setForm({ ...form, product: e.target.value, resourceIds: [] });
+      setResourceQuery("");
       return;
     }
     if (e.target.name === "billable") {
@@ -1160,6 +1169,7 @@ function Demands() {
   const openNew = () => {
     setEditing(null);
     setForm(emptyDemandForm);
+    setResourceQuery("");
     setModal(true);
   };
   const openEdit = (d: Demand) => {
@@ -1189,7 +1199,9 @@ function Demands() {
       type: d.type || "Evolutiva",
       version: d.version || "",
       artifactNumber: d.artifactNumber || "",
-      description: d.notes || "",
+      artifactUrl: d.artifactUrl || "",
+      description: d.description || "",
+      notes: d.notes || "",
       effort: String(d.effort),
       actualEffort: d.actualEffort === undefined ? "" : String(d.actualEffort),
       billable: String(d.billable ?? false),
@@ -1198,9 +1210,11 @@ function Demands() {
       origin: d.origin || "Produto",
       requester: d.requester || "",
       startDate: d.startDate || "",
+      endDate: d.endDate || "",
       due: d.dueDate || (parts.length === 2 ? `2026-${month[parts[1]] || "09"}-${parts[0].padStart(2, "0")}` : ""),
       resourceIds: d.resourceIds || [],
     });
+    setResourceQuery("");
     setModal(true);
   };
   const submit = (e: React.FormEvent) => {
@@ -1208,18 +1222,19 @@ function Demands() {
     const next: Record<string, string> = {};
     if (!form.name.trim()) next.name = "Informe o título da demanda.";
     if (!form.product) next.product = "Selecione um produto cadastrado.";
-    if (!form.requester.trim()) next.requester = "Informe o solicitante.";
-    if (!form.due) next.due = "Informe o prazo desejado.";
+    if (!form.type) next.type = "Selecione uma categoria.";
     if (Number(form.effort) <= 0) next.effort = "Informe um esforço válido.";
+    if (form.startDate && form.endDate && form.endDate < form.startDate) next.endDate = "A data de término deve ser igual ou posterior à data de início.";
+    if (form.artifactUrl.trim() && !/^https?:\/\//i.test(form.artifactUrl.trim())) next.artifactUrl = "Informe um link iniciado por http:// ou https://.";
     if (form.actualEffort !== "" && (!Number.isFinite(Number(form.actualEffort)) || Number(form.actualEffort) < 0)) next.actualEffort = "Informe um esforço realizado válido.";
     const billedAmount = Number(form.billedAmount);
     if (form.billable === "true" && (!Number.isFinite(billedAmount) || billedAmount < 0 || Math.abs(billedAmount * 100 - Math.round(billedAmount * 100)) > 0.000001)) next.billedAmount = "Informe um valor não negativo com até duas casas decimais.";
     setErrors(next);
     if (Object.keys(next).length) return;
-    const date = new Date(form.due + "T12:00:00");
+    const date = form.due ? new Date(form.due + "T12:00:00") : null;
     const due = date
-      .toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })
-      .replace(".", "");
+      ? date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }).replace(".", "")
+      : "Sem prazo";
     const data: Demand = {
       id: editing?.id || newDemandId(),
       name: form.name.trim(),
@@ -1240,8 +1255,11 @@ function Demands() {
       requester: form.requester.trim(),
       version: editing?.version,
       artifactNumber: form.artifactNumber.trim(),
-      notes: form.description,
+      artifactUrl: form.artifactUrl.trim(),
+      description: form.description.trim(),
+      notes: form.notes.trim(),
       startDate: form.startDate,
+      endDate: form.endDate,
       resourceIds: form.resourceIds,
     };
     setRows(
@@ -1359,12 +1377,16 @@ function Demands() {
               <div><span>Categoria</span><b>{viewing.type || "Não informada"}</b></div>
               <div><span>Responsável</span><b>{viewing.owner}</b></div>
               <div><span>Data de início</span><b>{viewing.startDate ? new Date(viewing.startDate + "T12:00:00").toLocaleDateString("pt-BR") : "Não informada"}</b></div>
+              <div><span>Data de término</span><b>{viewing.endDate ? new Date(viewing.endDate + "T12:00:00").toLocaleDateString("pt-BR") : "Não informada"}</b></div>
               <div><span>Prazo desejado</span><b>{viewing.dueDate ? new Date(viewing.dueDate + "T12:00:00").toLocaleDateString("pt-BR") : viewing.due}</b></div>
               <div><span>Esforço estimado</span><b>{viewing.effort}h</b></div>
               <div><span>Esforço realizado</span><b>{viewing.actualEffort === undefined ? "Não informado" : `${viewing.actualEffort}h`}</b></div>
               <div><span>Evolução</span><b>{viewing.progress}%</b></div>
               <div><span>Quarter</span><b>{roadmap.find((item) => item.demandId === viewing.id)?.quarter || "Planejamento"}</b></div>
+              {viewing.artifactNumber && <div><span>Número do artefato</span><b>{viewing.artifactNumber}</b></div>}
+              {viewing.artifactUrl && /^https?:\/\//i.test(viewing.artifactUrl) && <div><span>Link do artefato</span><a className="artifact-link" href={viewing.artifactUrl} target="_blank" rel="noreferrer">Abrir artefato <I.ExternalLink/></a></div>}
               <div className="wide"><span>Recursos</span><b>{(viewing.resourceIds || []).map((id) => team.find((person) => person.id === id)?.name).filter(Boolean).join(", ") || "Nenhum recurso alocado"}</b></div>
+              <div className="wide"><span>Descrição</span><p>{viewing.description || "Nenhuma descrição cadastrada."}</p></div>
               <div className="wide"><span>Observações</span><p>{viewing.notes || "Nenhuma observação cadastrada."}</p></div>
             </div>
             <div className="picker-foot"><button className="primary" onClick={() => setViewing(null)}>Fechar</button></div>
@@ -1401,166 +1423,67 @@ function Demands() {
               </button>
               <button type="submit" className="primary demand-header-save"><I.Save/> Salvar</button>
             </div>
-            <div className="modal-body">
+            <div className="modal-body demand-form-grid">
               <div className="form-field wide">
-                <label htmlFor="name">
-                  Título <em>*</em>
-                </label>
-                <input
-                  id="name"
-                  name="name"
-                  value={form.name}
-                  onChange={change}
-                  placeholder="Ex.: Integração com novo gateway"
-                  autoFocus
-                  className={errors.name ? "invalid" : ""}
-                />
-                {errors.name && (
-                  <small className="field-error">{errors.name}</small>
-                )}
+                <label htmlFor="name">Título <em>*</em></label>
+                <input id="name" name="name" required value={form.name} onChange={change} placeholder="Ex.: Integração com novo gateway" autoFocus className={errors.name ? "invalid" : ""}/>
+                {errors.name && <small className="field-error">{errors.name}</small>}
               </div>
               <div className="form-field wide">
-                <label htmlFor="description">Descrição</label>
-                <textarea
-                  id="description"
-                  name="description"
-                  value={form.description}
-                  onChange={change}
-                  placeholder="Descreva o contexto e o resultado esperado"
-                  rows={3}
-                />
+                <label htmlFor="description">Descrição <span className="optional-label">Opcional</span></label>
+                <textarea id="description" name="description" value={form.description} onChange={change} placeholder="Contexto e resultado esperado" rows={2}/>
               </div>
               <div className="form-field">
-                <label>
-                  Produto <em>*</em>
-                </label>
-                <select
-                  name="product"
-                  value={form.product}
-                  onChange={change}
-                  className={errors.product ? "invalid" : ""}
-                >
+                <label htmlFor="demandProduct">Produto <em>*</em></label>
+                <select id="demandProduct" name="product" required value={form.product} onChange={change} className={errors.product ? "invalid" : ""}>
                   <option value="">Selecione um produto...</option>
-                  {products
-                    .filter((product) => product.active)
-                    .map((product) => (
-                      <option key={product.id} value={product.name}>
-                        {product.name}
-                      </option>
-                    ))}
+                  {products.filter((product) => product.active).map((product) => <option key={product.id} value={product.name}>{product.name}</option>)}
                 </select>
-                {errors.product && (
-                  <small className="field-error">{errors.product}</small>
-                )}
+                {errors.product && <small className="field-error">{errors.product}</small>}
               </div>
               <div className="form-field team-readonly"><label>Time responsável <I.Lock/></label><div><I.UsersRound/><span><b>{selectedProduct?.team || "Selecione um produto"}</b><small>{selectedProduct ? `Coordenador: ${selectedProduct.coordinator}` : "Preenchido automaticamente"}</small></span></div></div>
               <div className="form-field"><label htmlFor="demandOwner">Responsável</label><input id="demandOwner" name="owner" value={form.owner} onChange={change} placeholder="Nome do responsável"/></div>
-              <div className="form-field wide"><label>Recursos</label><div className="resource-selector">{!form.product?<p>Selecione um produto para visualizar os colaboradores da squad.</p>:availableResources.length===0?<p>Nenhum colaborador cadastrado para {selectedProduct?.team}.</p>:availableResources.map((person)=><label key={person.id} className={form.resourceIds.includes(person.id)?"selected":""}><input type="checkbox" checked={form.resourceIds.includes(person.id)} onChange={()=>setForm({...form,resourceIds:form.resourceIds.includes(person.id)?form.resourceIds.filter((id)=>id!==person.id):[...form.resourceIds,person.id]})}/><span className="avatar">{person.name.split(" ").map((x)=>x[0]).slice(0,2).join("")}</span><span><b>{person.name}</b><small>{person.role} · {person.total}h de capacidade</small></span></label>)}</div><small className="resource-help">{form.resourceIds.length} recurso(s) selecionado(s)</small></div>
               <div className="form-field">
-                <label>
-                  Categoria <em>*</em>
-                </label>
-                <select name="type" value={form.type} onChange={change}>
-                  <option>Estratégica</option>
-                  <option>Evolutiva</option>
-                  <option>Bug</option>
-                  <option>Incidente</option>
-                  <option>Sustentação</option>
-                  <option>Regulatória</option>
-                  <option>Técnica</option>
-                  <option>Emergencial</option>
+                <label htmlFor="demandType">Categoria <em>*</em></label>
+                <select id="demandType" name="type" required value={form.type} onChange={change} className={errors.type ? "invalid" : ""}>
+                  <option value="">Selecione uma categoria...</option>
+                  <option>Estratégica</option><option>Evolutiva</option><option>Bug</option><option>Incidente</option><option>Sustentação</option><option>Regulatória</option><option>Técnica</option><option>Emergencial</option>
                 </select>
+                {errors.type && <small className="field-error">{errors.type}</small>}
               </div>
               <div className="form-field">
-                <label>Origem</label>
-                <select name="origin" value={form.origin} onChange={change}>
-                  <option>Produto</option>
-                  <option>Cliente</option>
-                  <option>Tecnologia</option>
-                  <option>Regulatório</option>
-                  <option>Operações</option>
-                </select>
+                <label htmlFor="demandOrigin">Origem</label>
+                <select id="demandOrigin" name="origin" value={form.origin} onChange={change}><option>Produto</option><option>Cliente</option><option>Tecnologia</option><option>Regulatório</option><option>Operações</option></select>
               </div>
-              <div className="form-field"><label htmlFor="artifactNumber">Número do Artefato</label><input id="artifactNumber" name="artifactNumber" value={form.artifactNumber} onChange={change} placeholder="Informe o número do artefato"/></div>
-              <div className="form-field">
-                <label htmlFor="requester">
-                  Solicitante <em>*</em>
-                </label>
-                <input
-                  id="requester"
-                  name="requester"
-                  value={form.requester}
-                  onChange={change}
-                  placeholder="Nome do solicitante"
-                  className={errors.requester ? "invalid" : ""}
-                />
-                {errors.requester && (
-                  <small className="field-error">{errors.requester}</small>
-                )}
-              </div>
-              <div className="form-field">
-                <label>Prioridade</label>
-                <select name="priority" value={form.priority} onChange={change}>
-                  <option>Baixa</option>
-                  <option>Média</option>
-                  <option>Alta</option>
-                  <option>Crítica</option>
-                </select>
-              </div>
-              <div className="form-field"><label>Status</label><select name="status" value={form.status} onChange={change}><option>Não Iniciado</option><option>Backlog</option><option>Planejado</option><option>Em análise</option><option>Em Estudos</option><option>Em Desenvolvimento</option><option>Concluído</option><option>Cancelado</option><option>Bloqueado</option></select></div>
-              {!editing&&<div className="form-field"><label>Quarter Desejado</label><select name="planningQuarter" value={form.planningQuarter} onChange={change}><option value="Planejamento">Deixar em planejamento</option>{quarters.map((quarter)=><option key={quarter}>{quarter}</option>)}</select><small className="resource-help">O quarter pertence ao planejamento, não à demanda.</small></div>}
-              <div className="form-field">
-                <label htmlFor="startDate">Data de início</label>
-                <input id="startDate" type="date" name="startDate" value={form.startDate} onChange={change}/>
-              </div>
-              <div className="form-field">
-                <label htmlFor="due">
-                  Prazo desejado <em>*</em>
-                </label>
-                <input
-                  id="due"
-                  type="date"
-                  name="due"
-                  value={form.due}
-                  onChange={change}
-                  className={errors.due ? "invalid" : ""}
-                />
-                {errors.due && (
-                  <small className="field-error">{errors.due}</small>
-                )}
-              </div>
-              <div className="form-field">
-                <label htmlFor="effort">Esforço estimado (horas)</label>
-                <input
-                  id="effort"
-                  type="number"
-                  min="1"
-                  name="effort"
-                  value={form.effort}
-                  onChange={change}
-                  className={errors.effort ? "invalid" : ""}
-                />
-                {errors.effort && (
-                  <small className="field-error">{errors.effort}</small>
-                )}
-              </div>
+              <div className="form-field"><label htmlFor="requester">Solicitante <span className="optional-label">Opcional</span></label><input id="requester" name="requester" value={form.requester} onChange={change} placeholder="Nome de quem solicitou"/></div>
+              <div className="form-field"><label htmlFor="artifactNumber">Número do artefato</label><input id="artifactNumber" name="artifactNumber" value={form.artifactNumber} onChange={change} placeholder="Ex.: 12345"/></div>
+              <div className="form-field"><label htmlFor="artifactUrl">Link do artefato</label><div className="input-with-icon"><I.ExternalLink/><input id="artifactUrl" name="artifactUrl" type="url" value={form.artifactUrl} onChange={change} placeholder="https://..." className={errors.artifactUrl ? "invalid" : ""}/></div>{errors.artifactUrl && <small className="field-error">{errors.artifactUrl}</small>}</div>
+              <div className="form-field"><label htmlFor="demandPriority">Prioridade</label><select id="demandPriority" name="priority" value={form.priority} onChange={change}><option>Baixa</option><option>Média</option><option>Alta</option><option>Crítica</option></select></div>
+              <div className="form-field"><label htmlFor="demandStatus">Status</label><select id="demandStatus" name="status" value={form.status} onChange={change}><option>Não Iniciado</option><option>Backlog</option><option>Planejado</option><option>Em análise</option><option>Em Estudos</option><option>Em Desenvolvimento</option><option>Concluído</option><option>Cancelado</option><option>Bloqueado</option></select></div>
+              {!editing && <div className="form-field wide"><label htmlFor="planningQuarter">Quarter desejado</label><select id="planningQuarter" name="planningQuarter" value={form.planningQuarter} onChange={change}><option value="Planejamento">Deixar em planejamento</option>{quarters.map((quarter)=><option key={quarter}>{quarter}</option>)}</select><small className="resource-help">O quarter define em qual período a demanda entra no roadmap.</small></div>}
+              <div className="form-field"><label htmlFor="startDate">Data de início</label><input id="startDate" type="date" name="startDate" value={form.startDate} onChange={change}/></div>
+              <div className="form-field"><label htmlFor="endDate">Data de término</label><input id="endDate" type="date" name="endDate" min={form.startDate || undefined} value={form.endDate} onChange={change} className={errors.endDate ? "invalid" : ""}/>{errors.endDate && <small className="field-error">{errors.endDate}</small>}</div>
+              <div className="form-field wide"><label htmlFor="due">Prazo desejado <span className="optional-label">Opcional</span></label><input id="due" type="date" name="due" value={form.due} onChange={change}/></div>
+              <div className="form-field"><label htmlFor="effort">Esforço estimado (horas)</label><input id="effort" type="number" min="1" name="effort" required value={form.effort} onChange={change} className={errors.effort ? "invalid" : ""}/>{errors.effort && <small className="field-error">{errors.effort}</small>}</div>
               <div className="form-field"><label htmlFor="actualEffort">Esforço realizado (horas)</label><input id="actualEffort" type="number" min="0" step="0.5" name="actualEffort" value={form.actualEffort} onChange={change} placeholder="Ainda não informado" className={errors.actualEffort ? "invalid" : ""}/>{errors.actualEffort && <small className="field-error">{errors.actualEffort}</small>}</div>
-              <div className="form-field">
-                <label htmlFor="billable">Faturamento</label>
-                <select id="billable" name="billable" value={form.billable} onChange={change}>
-                  <option value="false">Não faturável</option>
-                  <option value="true">Faturável</option>
-                </select>
-              </div>
-              <div className="form-field">
-                <label htmlFor="billedAmount">Valor faturado (R$)</label>
-                <input id="billedAmount" name="billedAmount" type="number" min="0" step="0.01" value={form.billedAmount} onChange={change} disabled={form.billable !== "true"} placeholder="0,00" className={errors.billedAmount ? "invalid" : ""}/>
-                <small className="resource-help">Um valor maior que zero identifica a demanda como faturada. Deixe vazio ou zero enquanto não houver faturamento.</small>
-                {errors.billedAmount && <small className="field-error" role="alert">{errors.billedAmount}</small>}
-              </div>
+              <div className="form-field"><label htmlFor="billable">Faturamento</label><select id="billable" name="billable" value={form.billable} onChange={change}><option value="false">Não faturável</option><option value="true">Faturável</option></select></div>
+              <div className="form-field"><label htmlFor="billedAmount">Valor faturado (R$)</label><input id="billedAmount" name="billedAmount" type="number" min="0" step="0.01" value={form.billedAmount} onChange={change} disabled={form.billable !== "true"} placeholder="0,00" className={errors.billedAmount ? "invalid" : ""}/>{errors.billedAmount && <small className="field-error" role="alert">{errors.billedAmount}</small>}</div>
+              <section className="form-field wide resource-picker-field" aria-label="Recursos da demanda">
+                <div className="resource-picker-heading"><div><b>Recursos</b><small>Selecione os colaboradores que atuarão nesta demanda.</small></div><span>{form.resourceIds.length} selecionado(s)</span></div>
+                <details className="resource-picker">
+                  <summary><span><I.UsersRound/><span>{form.resourceIds.length ? `${form.resourceIds.length} recurso(s) selecionado(s)` : "Selecionar recursos"}<small>{form.resourceIds.length ? availableResources.filter(person => form.resourceIds.includes(person.id)).map(person => person.name).join(", ") : selectedProduct ? `Time ${selectedProduct.team}` : "Selecione um produto primeiro"}</small></span></span><I.ChevronDown/></summary>
+                  <div className="resource-picker-panel">
+                    <label className="resource-search"><I.Search/><input type="search" value={resourceQuery} onChange={event => setResourceQuery(event.target.value)} placeholder="Buscar colaborador..."/></label>
+                    {!form.product ? <p className="resource-picker-empty">Selecione um produto para ver o time responsável.</p> : availableResources.length === 0 ? <p className="resource-picker-empty">Nenhum colaborador cadastrado para {selectedProduct?.team}.</p> : filteredResources.length === 0 ? <p className="resource-picker-empty">Nenhum colaborador encontrado.</p> : <div className="resource-picker-options">{filteredResources.map(person => {
+                      const selected = form.resourceIds.includes(person.id);
+                      return <button key={person.id} type="button" role="checkbox" aria-checked={selected} className={selected ? "selected" : ""} onClick={() => setForm(current => ({ ...current, resourceIds: selected ? current.resourceIds.filter(id => id !== person.id) : [...current.resourceIds, person.id] }))}><span className="avatar">{person.name.split(" ").map(part => part[0]).slice(0, 2).join("")}</span><span><b>{person.name}</b><small>{person.role} · {person.total}h disponíveis</small></span><I.Check/></button>;
+                    })}</div>}
+                  </div>
+                </details>
+              </section>
               <div className="form-field wide">
-                <label htmlFor="demandNotes">Observação</label>
-                <textarea id="demandNotes" name="description" value={form.description} onChange={change} rows={3} placeholder="Informações adicionais sobre a demanda" />
+                <label htmlFor="demandNotes">Observação <span className="optional-label">Opcional</span></label>
+                <textarea id="demandNotes" name="notes" value={form.notes} onChange={change} rows={2} placeholder="Anotações internas ou informações adicionais"/>
               </div>
             </div>
             <div className="capacity-preview">

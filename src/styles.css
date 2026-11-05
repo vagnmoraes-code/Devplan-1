@@ -52,3 +52,50 @@
 
 .login-card .ghost{justify-content:center;min-height:40px}
 .auth-success{color:#067647!important;font-size:12px!important}
+
+/* Cadastro de demanda */
+.demand-modal{width:min(940px,100%)}
+.demand-form-grid{gap:14px 18px;padding-top:22px;padding-bottom:18px}
+.demand-form-grid .form-field label{display:flex;align-items:center;gap:7px;color:inherit;font-size:11px}
+.optional-label{padding:2px 6px;border-radius:999px;background:var(--soft);color:var(--muted);font-size:9px;font-weight:500}
+.demand-form-grid textarea{min-height:62px}
+.input-with-icon{position:relative}
+.input-with-icon>svg{position:absolute;left:11px;top:50%;width:15px;height:15px;transform:translateY(-50%);color:var(--muted);pointer-events:none}
+.input-with-icon input{padding-left:34px}
+.resource-picker-field{gap:8px;padding:13px;border:1px solid var(--line);border-radius:11px;background:var(--soft)}
+.resource-picker-heading{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.resource-picker-heading>div{display:flex;flex-direction:column;gap:3px}
+.resource-picker-heading b{font-size:11px}
+.resource-picker-heading small{font-size:10px;color:var(--muted)}
+.resource-picker-heading>span{white-space:nowrap;color:#7052f5;font-size:10px;font-weight:700}
+.resource-picker{border:1px solid var(--line);border-radius:9px;background:var(--bg)}
+.resource-picker summary{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px;padding:8px 11px;list-style:none;cursor:pointer}
+.resource-picker summary::-webkit-details-marker{display:none}
+.resource-picker summary>span{display:flex;align-items:center;gap:9px;min-width:0}
+.resource-picker summary>span>svg{width:17px;height:17px;flex:none;color:#7052f5}
+.resource-picker summary>span>span{display:flex;flex-direction:column;gap:2px;min-width:0;font-size:10px;font-weight:700}
+.resource-picker summary small{overflow:hidden;color:var(--muted);font-size:9px;font-weight:400;text-overflow:ellipsis;white-space:nowrap}
+.resource-picker summary>svg{width:16px;height:16px;flex:none;color:var(--muted);transition:transform .18s ease}
+.resource-picker[open] summary>svg{transform:rotate(180deg)}
+.resource-picker-panel{padding:0 10px 10px;border-top:1px solid var(--line)}
+.resource-search{position:relative;display:flex;align-items:center;margin:10px 0 8px}
+.resource-search>svg{position:absolute;left:10px;width:14px;height:14px;color:var(--muted)}
+.resource-search input{width:100%;height:34px;padding:7px 10px 7px 31px;border:1px solid var(--line);border-radius:7px;background:var(--soft);color:inherit;font-size:11px;outline:0}
+.resource-search input:focus{border-color:#7052f5;box-shadow:0 0 0 3px #7052f516}
+.resource-picker-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;max-height:178px;overflow:auto}
+.resource-picker-options button{display:flex;align-items:center;gap:8px;min-width:0;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:inherit;text-align:left;cursor:pointer}
+.resource-picker-options button:hover{border-color:#a99af9}
+.resource-picker-options button.selected{border-color:#16a36a;background:#effaf5}
+.dark .resource-picker-options button.selected{background:#143b32;border-color:#34d399}
+.resource-picker-options .avatar{width:27px;height:27px;min-width:27px;font-size:9px}
+.resource-picker-options button>span:nth-child(2){display:flex;flex:1;flex-direction:column;gap:3px;min-width:0}
+.resource-picker-options button b,.resource-picker-options button small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.resource-picker-options button b{font-size:10px}
+.resource-picker-options button small{color:var(--muted);font-size:9px}
+.resource-picker-options button>svg{width:15px;height:15px;flex:none;color:transparent}
+.resource-picker-options button.selected>svg{color:#138a5a}
+.resource-picker-empty{margin:12px 2px 4px;color:var(--muted);font-size:10px}
+.artifact-link{display:inline-flex;align-items:center;gap:5px;color:#7052f5;font-size:11px;font-weight:700;text-decoration:none}
+.artifact-link:hover{text-decoration:underline}
+.artifact-link svg{width:13px;height:13px}
+@media(max-width:760px){.resource-picker-options{grid-template-columns:1fr}.demand-form-grid .form-field.wide{grid-column:auto}}

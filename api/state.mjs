@@ -150,8 +150,11 @@ async function loadDemands(url, key) {
     ...(row.requester == null ? {} : { requester: row.requester }),
     ...(row.version == null ? {} : { version: row.version }),
     ...(row.artifact_number == null ? {} : { artifactNumber: row.artifact_number }),
+    ...(row.artifact_url == null ? {} : { artifactUrl: row.artifact_url }),
+    ...(row.description == null ? {} : { description: row.description }),
     ...(row.notes == null ? {} : { notes: row.notes }),
     ...(row.start_date == null ? {} : { startDate: row.start_date }),
+    ...(row.end_date == null ? {} : { endDate: row.end_date }),
     ...(row.due_date == null ? {} : { dueDate: row.due_date }),
     resourceIds: resourcesByDemand.get(row.id) || [],
   }));

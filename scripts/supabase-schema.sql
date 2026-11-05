@@ -158,12 +158,18 @@ create table if not exists public.demands (
   requester text,
   version text,
   artifact_number text,
+  artifact_url text,
+  description text,
   notes text,
   start_date text,
+  end_date text,
   due_date text
 );
 
 alter table public.demands add column if not exists sort_order integer not null default 0;
+alter table public.demands add column if not exists artifact_url text;
+alter table public.demands add column if not exists description text;
+alter table public.demands add column if not exists end_date text;
 alter table public.demands enable row level security;
 grant all on table public.demands to service_role;
 alter table public.demand_staff enable row level security;
@@ -320,7 +326,7 @@ begin
   insert into public.demands (
     id, name, product_id, owner, status, priority, effort, actual_effort,
     billable, billed_amount, progress, due, risk, type, origin, requester,
-    version, artifact_number, notes, start_date, due_date, sort_order
+    version, artifact_number, artifact_url, description, notes, start_date, end_date, due_date, sort_order
   )
   select
     item.value->>'id',
@@ -341,8 +347,11 @@ begin
     item.value->>'requester',
     item.value->>'version',
     item.value->>'artifactNumber',
+    item.value->>'artifactUrl',
+    item.value->>'description',
     item.value->>'notes',
     item.value->>'startDate',
+    item.value->>'endDate',
     item.value->>'dueDate',
     (item.ordinality - 1)::integer
   from jsonb_array_elements(p_records) with ordinality as item(value, ordinality)
@@ -371,8 +380,11 @@ begin
     requester = excluded.requester,
     version = excluded.version,
     artifact_number = excluded.artifact_number,
+    artifact_url = excluded.artifact_url,
+    description = excluded.description,
     notes = excluded.notes,
     start_date = excluded.start_date,
+    end_date = excluded.end_date,
     due_date = excluded.due_date,
     sort_order = excluded.sort_order;
 
