@@ -53,17 +53,19 @@ function isCollectionPayload(records) {
   );
 }
 
-function hasDuplicateDemandIds(records) {
+function duplicateDemandIds(records) {
   const demandRecord = records.find(record => record.key === DEMANDS_COLLECTION);
-  if (!demandRecord) return false;
+  if (!demandRecord) return [];
 
   const seen = new Set();
+  const duplicates = new Set();
   for (const demand of demandRecord.value) {
-    const id = typeof demand.id === "string" ? demand.id.trim() : "";
-    if (id && seen.has(id)) return true;
+    // Match PostgreSQL text primary key semantics: whitespace is significant.
+    const id = typeof demand.id === "string" ? demand.id : "";
+    if (id && seen.has(id)) duplicates.add(id);
     if (id) seen.add(id);
   }
-  return false;
+  return [...duplicates];
 }
 
 async function loadCollections(url, key) {
@@ -230,10 +232,11 @@ export async function startApiServer() {
           sendJson(response, 400, { error: "Invalid collection data." });
           return;
         }
-        if (hasDuplicateDemandIds(records)) {
+        const duplicateIds = duplicateDemandIds(records);
+        if (duplicateIds.length) {
           sendJson(response, 400, {
             error: "Invalid demand data.",
-            detail: "Há IDs de demanda repetidos. Cada demanda precisa ter um ID único; corrija os registros e tente novamente.",
+            detail: `Há IDs de demanda repetidos (${duplicateIds.join(", ")}). Cada demanda precisa ter um ID único.`,
           });
           return;
         }

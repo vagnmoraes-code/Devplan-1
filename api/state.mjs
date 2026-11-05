@@ -45,17 +45,19 @@ function safeDiagnostic(error) {
   return "Falha interna ao acessar o Supabase. Consulte os logs da função na Vercel.";
 }
 
-function duplicateDemandId(records) {
+function duplicateDemandIds(records) {
   const demandRecord = records.find(record => record.key === DEMANDS_COLLECTION);
-  if (!demandRecord) return false;
+  if (!demandRecord) return [];
 
   const seen = new Set();
+  const duplicates = new Set();
   for (const demand of demandRecord.value) {
-    const id = typeof demand.id === "string" ? demand.id.trim() : "";
-    if (id && seen.has(id)) return true;
+    // Match PostgreSQL text primary key semantics: whitespace is significant.
+    const id = typeof demand.id === "string" ? demand.id : "";
+    if (id && seen.has(id)) duplicates.add(id);
     if (id) seen.add(id);
   }
-  return false;
+  return [...duplicates];
 }
 
 function isCardinalityViolation(error) {
@@ -202,10 +204,11 @@ export default async function handler(request, response) {
 
     const records = Array.isArray(request.body) ? request.body : [request.body];
     if (!isCollectionPayload(records)) return sendJson(response, 400, { error: "Invalid collection data." });
-    if (duplicateDemandId(records)) {
+    const duplicateIds = duplicateDemandIds(records);
+    if (duplicateIds.length) {
       return sendJson(response, 400, {
         error: "Invalid demand data.",
-        detail: "Há IDs de demanda repetidos. Cada demanda precisa ter um ID único; corrija os registros e tente novamente.",
+        detail: `Há IDs de demanda repetidos (${duplicateIds.join(", ")}). Cada demanda precisa ter um ID único.`,
       });
     }
 
