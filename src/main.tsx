@@ -278,6 +278,7 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const { team } = useTeam();
   const [productFilter, setProductFilter] = useState("Todos");
   const [capacityQuarter, setCapacityQuarter] = useState(currentQuarter);
+  const capacityProductName = products.find(product => product.code.trim().toUpperCase() === "CARGO" || product.name.trim().toLowerCase() === "nddcargo")?.name ?? "nddCargo";
   const scoped = productFilter === "Todos" ? rows : rows.filter((d) => d.product === productFilter);
   const demandProgress = (demand: Demand) => {
     const progress = Math.min(100, Math.max(0, Number(demand.progress) || 0));
@@ -288,24 +289,14 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const scopedIds = new Set(scoped.map((d) => d.id));
   const planned = roadmap.filter((item) => scopedIds.has(item.demandId));
   const effort = scoped.reduce((sum, demand) => sum + demand.effort, 0);
-  const scopedTeam = (productFilter === "Todos" ? team : team.filter((person) => person.product === productFilter)).filter(person => person.active !== false);
+  const capacityProductFilter = productFilter === "Todos" ? capacityProductName : productFilter;
+  const scopedTeam = team.filter(person => person.product.trim().toLowerCase() === capacityProductFilter.trim().toLowerCase() && person.active !== false);
   const collaboratorKey = (person: Staff) => {
     const normalizedName = person.name.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
     return normalizedName || `id:${person.id}`;
   };
   const collaboratorCount = (people: Staff[]) => new Set(people.map(collaboratorKey)).size;
-  const capacityForActivePeople = (people: Staff[]) => {
-    // No consolidado, uma pessoa vinculada a mais de um produto conta uma única vez.
-    const capacityByPerson = new Map<string, number>();
-    people.forEach((person) => {
-      const value = Number(person.total);
-      if (!Number.isFinite(value) || value <= 0) return;
-      const key = collaboratorKey(person);
-      capacityByPerson.set(key, Math.max(capacityByPerson.get(key) ?? 0, value));
-    });
-    return [...capacityByPerson.values()].reduce((sum, capacity) => sum + capacity, 0);
-  };
-  const totalCapacity = capacityForActivePeople(scopedTeam);
+  const totalCapacity = scopedTeam.reduce((sum, person) => sum + person.total, 0);
   const demandHoursFor = (staffId: number) => scoped.reduce((total, demand) => {
     const plan = roadmap.find((item) => item.demandId === demand.id);
     const explicit = plan?.allocations.find((item) => item.staffId === staffId);
@@ -326,9 +317,9 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   );
   const roadmapCapacity = scopedTeam.reduce((sum, person) => sum + demandHoursFor(person.id), 0);
   const baseCapacity = 0;
-  const availableCapacity = Math.max(0, totalCapacity - allocatedCapacity);
+  const availableCapacity = totalCapacity - allocatedCapacity;
   const utilization = totalCapacity ? Math.round((allocatedCapacity / totalCapacity) * 100) : 0;
-  const capacityByProduct=products.filter((product)=>product.active&&(productFilter==="Todos"||product.name===productFilter)).map((product)=>{const people=team.filter((person)=>person.product===product.name&&person.active!==false);const total=capacityForActivePeople(people);const allocated=people.reduce((sum,person)=>sum+demandHoursFor(person.id),0);return {product:product.name,total,allocated,available:total-allocated,collaborators:collaboratorCount(people),utilization:total?Math.round(allocated/total*100):0}});
+  const capacityByProduct=products.filter((product)=>product.active&&(productFilter==="Todos"||product.name===productFilter)).map((product)=>{const people=team.filter((person)=>person.product===product.name&&person.active!==false);const total=people.reduce((sum,person)=>sum+person.total,0);const allocated=people.reduce((sum,person)=>sum+demandHoursFor(person.id),0);return {product:product.name,total,allocated,available:total-allocated,collaborators:collaboratorCount(people),utilization:total?Math.round(allocated/total*100):0}});
   const quarterKey = capacityQuarter.slice(0, 2);
   const monthLabels: Record<string, string[]> = {
     Q1: ["Jan", "Fev", "Mar"],
@@ -360,14 +351,14 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const testingTeam = scopedTeam.filter(person => ["QA", "QA ENGINEER"].includes(person.role.trim().toUpperCase()));
   const coordinationTeam = scopedTeam.filter(person => person.role.trim().toUpperCase() === "COORDENADOR");
   const specialistTeam = scopedTeam.filter(person => ["ESPECIALISTA", "ESPECIALISTA DEV 1"].includes(person.role.trim().toUpperCase()));
-  const developmentCapacity = capacityForActivePeople(developmentTeam);
-  const testingCapacity = capacityForActivePeople(testingTeam);
-  const coordinationCapacity = capacityForActivePeople(coordinationTeam);
-  const specialistCapacity = capacityForActivePeople(specialistTeam);
+  const developmentCapacity = developmentTeam.reduce((sum, person) => sum + person.total, 0);
+  const testingCapacity = testingTeam.reduce((sum, person) => sum + person.total, 0);
+  const coordinationCapacity = coordinationTeam.reduce((sum, person) => sum + person.total, 0);
+  const specialistCapacity = specialistTeam.reduce((sum, person) => sum + person.total, 0);
   const progress = scoped.length ? Math.round(scoped.reduce((sum, demand) => sum + demandProgress(demand), 0) / scoped.length) : 0;
   const criticalDemands = scoped.filter(demand => ["alto", "crítico", "critico"].includes(demand.risk.trim().toLocaleLowerCase("pt-BR"))).length;
   const kpis = [
-    ["Capacidade total", `${totalCapacity}h`, `${utilization}% alocada · ${collaboratorCount(scopedTeam)} colaboradores ativos`, utilization > 90 ? "bad" : "blue", I.Users, utilization > 90 ? "kpi-capacity-critical" : "kpi-capacity"],
+    ["Capacidade total", `${totalCapacity}h`, productFilter === "Todos" ? `${utilization}% alocada · ${collaboratorCount(scopedTeam)} ativos em ${capacityProductName}` : `${utilization}% alocada · ${collaboratorCount(scopedTeam)} colaboradores ativos`, utilization > 90 ? "bad" : "blue", I.Users, utilization > 90 ? "kpi-capacity-critical" : "kpi-capacity"],
     ["Capacidade estimada", `${effort}h`, `${scoped.length} demandas`, "warn", I.Gauge, "kpi-effort"],
     ["Roadmap planejado", String(planned.length), `${completed} concluídas`, "cyan", I.Map, "kpi-roadmap"],
     ["Progresso médio", `${progress}%`, "no escopo atual", "good", I.Crosshair, "kpi-progress"],
