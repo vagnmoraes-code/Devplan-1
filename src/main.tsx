@@ -289,11 +289,23 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const planned = roadmap.filter((item) => scopedIds.has(item.demandId));
   const effort = scoped.reduce((sum, demand) => sum + demand.effort, 0);
   const scopedTeam = (productFilter === "Todos" ? team : team.filter((person) => person.product === productFilter)).filter(person => person.active !== false);
-  const collaboratorCount = (people: Staff[]) => new Set(people.map((person) => {
+  const collaboratorKey = (person: Staff) => {
     const normalizedName = person.name.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
     return normalizedName || `id:${person.id}`;
-  })).size;
-  const totalCapacity = scopedTeam.reduce((sum, person) => sum + person.total, 0);
+  };
+  const collaboratorCount = (people: Staff[]) => new Set(people.map(collaboratorKey)).size;
+  const capacityForActivePeople = (people: Staff[]) => {
+    // No consolidado, uma pessoa vinculada a mais de um produto conta uma única vez.
+    const capacityByPerson = new Map<string, number>();
+    people.forEach((person) => {
+      const value = Number(person.total);
+      if (!Number.isFinite(value) || value <= 0) return;
+      const key = collaboratorKey(person);
+      capacityByPerson.set(key, Math.max(capacityByPerson.get(key) ?? 0, value));
+    });
+    return [...capacityByPerson.values()].reduce((sum, capacity) => sum + capacity, 0);
+  };
+  const totalCapacity = capacityForActivePeople(scopedTeam);
   const demandHoursFor = (staffId: number) => scoped.reduce((total, demand) => {
     const plan = roadmap.find((item) => item.demandId === demand.id);
     const explicit = plan?.allocations.find((item) => item.staffId === staffId);
@@ -316,7 +328,7 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const baseCapacity = 0;
   const availableCapacity = Math.max(0, totalCapacity - allocatedCapacity);
   const utilization = totalCapacity ? Math.round((allocatedCapacity / totalCapacity) * 100) : 0;
-  const capacityByProduct=products.filter((product)=>product.active&&(productFilter==="Todos"||product.name===productFilter)).map((product)=>{const people=team.filter((person)=>person.product===product.name&&person.active!==false);const total=people.reduce((sum,person)=>sum+person.total,0);const allocated=people.reduce((sum,person)=>sum+demandHoursFor(person.id),0);return {product:product.name,total,allocated,available:total-allocated,collaborators:collaboratorCount(people),utilization:total?Math.round(allocated/total*100):0}});
+  const capacityByProduct=products.filter((product)=>product.active&&(productFilter==="Todos"||product.name===productFilter)).map((product)=>{const people=team.filter((person)=>person.product===product.name&&person.active!==false);const total=capacityForActivePeople(people);const allocated=people.reduce((sum,person)=>sum+demandHoursFor(person.id),0);return {product:product.name,total,allocated,available:total-allocated,collaborators:collaboratorCount(people),utilization:total?Math.round(allocated/total*100):0}});
   const quarterKey = capacityQuarter.slice(0, 2);
   const monthLabels: Record<string, string[]> = {
     Q1: ["Jan", "Fev", "Mar"],
@@ -348,10 +360,10 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const testingTeam = scopedTeam.filter(person => ["QA", "QA ENGINEER"].includes(person.role.trim().toUpperCase()));
   const coordinationTeam = scopedTeam.filter(person => person.role.trim().toUpperCase() === "COORDENADOR");
   const specialistTeam = scopedTeam.filter(person => ["ESPECIALISTA", "ESPECIALISTA DEV 1"].includes(person.role.trim().toUpperCase()));
-  const developmentCapacity = developmentTeam.reduce((sum, person) => sum + person.total, 0);
-  const testingCapacity = testingTeam.reduce((sum, person) => sum + person.total, 0);
-  const coordinationCapacity = coordinationTeam.reduce((sum, person) => sum + person.total, 0);
-  const specialistCapacity = specialistTeam.reduce((sum, person) => sum + person.total, 0);
+  const developmentCapacity = capacityForActivePeople(developmentTeam);
+  const testingCapacity = capacityForActivePeople(testingTeam);
+  const coordinationCapacity = capacityForActivePeople(coordinationTeam);
+  const specialistCapacity = capacityForActivePeople(specialistTeam);
   const progress = scoped.length ? Math.round(scoped.reduce((sum, demand) => sum + demandProgress(demand), 0) / scoped.length) : 0;
   const criticalDemands = scoped.filter(demand => ["alto", "crítico", "critico"].includes(demand.risk.trim().toLocaleLowerCase("pt-BR"))).length;
   const kpis = [
@@ -2061,6 +2073,12 @@ function Capacity() {
   const effectiveUsed = (person: Staff) => allocatedDemandHours(person);
   const filteredTeam=[...team.filter(person=>person.product.trim().toLowerCase()===cargoName.trim().toLowerCase())].sort((a,b)=>Number(b.active!==false)-Number(a.active!==false)||a.name.localeCompare(b.name,"pt-BR"));
   const activeTeam=filteredTeam.filter(person=>person.active!==false);
+  const uniqueCollaboratorCount = (people: Staff[]) => new Set(people.map((person) => {
+    const name = person.name.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
+    return name || `id:${person.id}`;
+  })).size;
+  const activeCollaboratorCount = uniqueCollaboratorCount(activeTeam);
+  const blockedCollaboratorCount = uniqueCollaboratorCount(filteredTeam.filter(person => person.active === false));
   const total = activeTeam.reduce((sum, m) => sum + m.total, 0);
   const used = activeTeam.reduce((sum, m) => sum + effectiveUsed(m), 0);
   const free = total - used;
@@ -2147,11 +2165,16 @@ function Capacity() {
       />
       {importFeedback&&<div className="import-feedback"><I.CircleCheck/><span>{importFeedback}</span><button onClick={()=>setImportFeedback("")}><I.X/></button></div>}
       <div className="capacity-filter"><div><I.Boxes/><span><b>Capacidade do nddCargo</b><small>Exibindo apenas colaboradores vinculados a este produto</small></span></div><Badge tone="gray">{cargoName}</Badge></div>
-      <div className="kpis compact">
+      <div className="kpis compact capacity-summary-kpis">
         <Card>
           <span>Capacidade total</span>
           <strong>{total}h</strong>
-          <small>{activeTeam.length} ativos · {filteredTeam.length-activeTeam.length} bloqueados</small>
+          <small>capacidade cadastrada no produto</small>
+        </Card>
+        <Card>
+          <span>Colaboradores ativos</span>
+          <strong>{activeCollaboratorCount}</strong>
+          <small>no produto {cargoName}</small>
         </Card>
         <Card>
           <span>Alocada</span>
@@ -2181,7 +2204,7 @@ function Capacity() {
             <h3>Alocação por colaborador</h3>
             <p>Capacidade trimestral para {currentQuarter}</p>
           </div>
-          <Badge tone="gray">{activeTeam.length} ativos · {filteredTeam.length-activeTeam.length} bloqueados</Badge>
+          <Badge tone="gray">{activeCollaboratorCount} ativos · {blockedCollaboratorCount} bloqueados</Badge>
         </div>
         <div className="people">
           {filteredTeam.map((m) => {
@@ -2812,7 +2835,7 @@ function App() {
   async function updateAccounts(next:Account[]){if(await saveAccounts(next))setAccounts(next)}
   async function login(account:Account,remember:boolean,next?:Account[]){const lastAccessAt=new Date().toISOString();const updated=(next??loadAccounts()).map(user=>user.id===account.id?{...user,lastAccessAt}:user);if(!await saveAccounts(updated))throw new Error("Falha ao salvar acesso no Supabase.");setAccounts(updated);setSession(account.id,remember);setActiveId(account.id)}
   function logout(){setSession(null);setActiveId(null);setCmd(false)}
-  const allowedNav=nav.filter(([name])=>role==="Administrador"?true:role==="Gestor"?["Visão geral","Demandas","Roadmap","Iniciativas","Baseline","Produtos","Capacidade","Analytics"].includes(name):["Demandas","Roadmap","Iniciativas","Baseline","Capacidade","Analytics"].includes(name));
+  const allowedNav=nav.filter(([name])=>role==="Administrador"?true:role==="Gestor"?["Visão geral","Demandas","Roadmap","Iniciativas","Baseline","Capacidade","Analytics"].includes(name):["Demandas","Roadmap","Iniciativas","Baseline","Capacidade","Analytics"].includes(name));
   const mainNav=allowedNav.filter(([name])=>mainNavPages.includes(name));
   const secondaryNav=allowedNav.filter(([name])=>!mainNavPages.includes(name));
   useEffect(()=>{if(!allowedNav.some(([name])=>name===page))setPage(role==="Visualização"?"Demandas":"Visão geral")},[role]);
@@ -2890,7 +2913,7 @@ function App() {
           ) : page === "Demandas" ? (
             <Demands />
           ) : page === "Produtos" ? (
-            <Products />
+            role === "Administrador" ? <Products /> : <Dashboard go={setPage} />
           ) : page === "Capacidade" ? (
             <Capacity />
           ) : page === "Visibilidade Entregas" ? (
