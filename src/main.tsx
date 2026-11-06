@@ -279,13 +279,22 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const [productFilter, setProductFilter] = useState("Todos");
   const [capacityQuarter, setCapacityQuarter] = useState(currentQuarter);
   const scoped = productFilter === "Todos" ? rows : rows.filter((d) => d.product === productFilter);
-  const progressTrend = [...scoped].sort((a, b) => a.id.localeCompare(b.id)).slice(-6).map(demand => ({ w: demand.id, progress: demand.progress }));
+  const demandProgress = (demand: Demand) => {
+    const progress = Math.min(100, Math.max(0, Number(demand.progress) || 0));
+    const status = demand.status.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR");
+    return ["concluido", "concluida"].includes(status) || progress === 100 ? 100 : progress;
+  };
+  const progressTrend = [...scoped].sort((a, b) => a.id.localeCompare(b.id)).slice(-6).map(demand => ({ w: demand.id, progress: demandProgress(demand) }));
   const scopedIds = new Set(scoped.map((d) => d.id));
   const planned = roadmap.filter((item) => scopedIds.has(item.demandId));
   const effort = scoped.reduce((sum, demand) => sum + demand.effort, 0);
   const scopedTeam = (productFilter === "Todos" ? team : team.filter((person) => person.product === productFilter)).filter(person => person.active !== false);
+  const collaboratorCount = (people: Staff[]) => new Set(people.map((person) => {
+    const normalizedName = person.name.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
+    return normalizedName || `id:${person.id}`;
+  })).size;
   const totalCapacity = scopedTeam.reduce((sum, person) => sum + person.total, 0);
-  const demandHoursFor = (staffId: number) => rows.reduce((total, demand) => {
+  const demandHoursFor = (staffId: number) => scoped.reduce((total, demand) => {
     const plan = roadmap.find((item) => item.demandId === demand.id);
     const explicit = plan?.allocations.find((item) => item.staffId === staffId);
     const linkedIds = demand.resourceIds || [];
@@ -307,7 +316,7 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const baseCapacity = 0;
   const availableCapacity = Math.max(0, totalCapacity - allocatedCapacity);
   const utilization = totalCapacity ? Math.round((allocatedCapacity / totalCapacity) * 100) : 0;
-  const capacityByProduct=products.filter((product)=>product.active&&(productFilter==="Todos"||product.name===productFilter)).map((product)=>{const people=team.filter((person)=>person.product===product.name&&person.active!==false);const total=people.reduce((sum,person)=>sum+person.total,0);const allocated=people.reduce((sum,person)=>sum+demandHoursFor(person.id),0);return {product:product.name,total,allocated,available:total-allocated,collaborators:people.length,utilization:total?Math.round(allocated/total*100):0}});
+  const capacityByProduct=products.filter((product)=>product.active&&(productFilter==="Todos"||product.name===productFilter)).map((product)=>{const people=team.filter((person)=>person.product===product.name&&person.active!==false);const total=people.reduce((sum,person)=>sum+person.total,0);const allocated=people.reduce((sum,person)=>sum+demandHoursFor(person.id),0);return {product:product.name,total,allocated,available:total-allocated,collaborators:collaboratorCount(people),utilization:total?Math.round(allocated/total*100):0}});
   const quarterKey = capacityQuarter.slice(0, 2);
   const monthLabels: Record<string, string[]> = {
     Q1: ["Jan", "Fev", "Mar"],
@@ -334,7 +343,7 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
     const sustentacao = Math.round(baseCapacity / 3);
     return { m, roadmap: roadmapHours, sustentacao, novas: 0, reserva: Math.max(0, monthlyTotal - roadmapHours - sustentacao) };
   });
-  const completed = scoped.filter((d) => ["Concluído", "Concluída"].includes(d.status)).length;
+  const completed = scoped.filter((d) => demandProgress(d) === 100).length;
   const developmentTeam = scopedTeam.filter(person => ["DEV", "BACKEND", "FRONTEND", "FULL STACK"].includes(person.role.trim().toUpperCase()));
   const testingTeam = scopedTeam.filter(person => ["QA", "QA ENGINEER"].includes(person.role.trim().toUpperCase()));
   const coordinationTeam = scopedTeam.filter(person => person.role.trim().toUpperCase() === "COORDENADOR");
@@ -343,10 +352,10 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const testingCapacity = testingTeam.reduce((sum, person) => sum + person.total, 0);
   const coordinationCapacity = coordinationTeam.reduce((sum, person) => sum + person.total, 0);
   const specialistCapacity = specialistTeam.reduce((sum, person) => sum + person.total, 0);
-  const progress = scoped.length ? Math.round(scoped.reduce((sum, d) => sum + d.progress, 0) / scoped.length) : 0;
+  const progress = scoped.length ? Math.round(scoped.reduce((sum, demand) => sum + demandProgress(demand), 0) / scoped.length) : 0;
   const criticalDemands = scoped.filter(demand => ["alto", "crítico", "critico"].includes(demand.risk.trim().toLocaleLowerCase("pt-BR"))).length;
   const kpis = [
-    ["Capacidade total", `${totalCapacity}h`, `${utilization}% alocada · ${scopedTeam.length} colaboradores`, utilization > 90 ? "bad" : "blue", I.Users, utilization > 90 ? "kpi-capacity-critical" : "kpi-capacity"],
+    ["Capacidade total", `${totalCapacity}h`, `${utilization}% alocada · ${collaboratorCount(scopedTeam)} colaboradores ativos`, utilization > 90 ? "bad" : "blue", I.Users, utilization > 90 ? "kpi-capacity-critical" : "kpi-capacity"],
     ["Capacidade estimada", `${effort}h`, `${scoped.length} demandas`, "warn", I.Gauge, "kpi-effort"],
     ["Roadmap planejado", String(planned.length), `${completed} concluídas`, "cyan", I.Map, "kpi-roadmap"],
     ["Progresso médio", `${progress}%`, "no escopo atual", "good", I.Crosshair, "kpi-progress"],
@@ -375,7 +384,7 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
           </Card>
         ))}
       </div>
-      <Card className="discipline-capacity-card"><div className="cardhead"><div><h3>Capacidade por disciplina</h3><p>Horas cadastradas para o escopo selecionado</p></div></div><div className="discipline-capacity-grid"><div><span><I.Code2/> Capacidade de Desenvolvimento</span><strong>{developmentCapacity}h</strong><small>{developmentTeam.length} colaboradores DEV</small></div><div><span><I.FlaskConical/> Capacidade de Testes</span><strong>{testingCapacity}h</strong><small>{testingTeam.length} colaboradores QA</small></div><div><span><I.UsersRound/> Capacidade de Coordenação</span><strong>{coordinationCapacity}h</strong><small>{coordinationTeam.length} coordenador(es)</small></div><div><span><I.Braces/> Capacidade de Especialista DEV 1</span><strong>{specialistCapacity}h</strong><small>{specialistTeam.length} especialista(s)</small></div></div></Card>
+      <Card className="discipline-capacity-card"><div className="cardhead"><div><h3>Capacidade por disciplina</h3><p>Horas cadastradas para o escopo selecionado</p></div></div><div className="discipline-capacity-grid"><div><span><I.Code2/> Capacidade de Desenvolvimento</span><strong>{developmentCapacity}h</strong><small>{collaboratorCount(developmentTeam)} colaboradores DEV</small></div><div><span><I.FlaskConical/> Capacidade de Testes</span><strong>{testingCapacity}h</strong><small>{collaboratorCount(testingTeam)} colaboradores QA</small></div><div><span><I.UsersRound/> Capacidade de Coordenação</span><strong>{coordinationCapacity}h</strong><small>{collaboratorCount(coordinationTeam)} coordenador(es)</small></div><div><span><I.Braces/> Capacidade de Especialista DEV 1</span><strong>{specialistCapacity}h</strong><small>{collaboratorCount(specialistTeam)} especialista(s)</small></div></div></Card>
       <Card className="product-capacity-card"><div className="cardhead"><div><h3>Capacidade por produto</h3><p>Capacidade cadastrada, alocada e disponível por produto</p></div><Badge tone="gray">{capacityByProduct.length} produto(s)</Badge></div><div className="product-capacity-grid">{capacityByProduct.map((item)=><div className="product-capacity-item" key={item.product}><div><span className="product-mini-icon"><I.Boxes/></span><div><b>{item.product}</b><small>{item.available}h disponíveis</small></div><strong className={item.utilization>90?"bad":""}>{item.utilization}%</strong></div><div className="product-capacity-bar"><i className={item.utilization>90?"over":""} style={{width:Math.min(item.utilization,100)+"%"}}/></div><footer><span>Total <b>{item.total}h</b></span><span>Alocada <b>{item.allocated}h</b></span><span>Colaboradores <b>{item.collaborators}</b></span></footer></div>)}</div></Card>
       <div className="grid2">
         <Card>
