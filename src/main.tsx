@@ -291,7 +291,6 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const { team } = useTeam();
   const [productFilter, setProductFilter] = useState("Todos");
   const [capacityQuarter, setCapacityQuarter] = useState(currentQuarter);
-  const capacityProductName = products.find(product => product.code.trim().toUpperCase() === "CARGO" || product.name.trim().toLowerCase() === "nddcargo")?.name ?? "nddCargo";
   const scoped = productFilter === "Todos" ? rows : rows.filter((d) => d.product === productFilter);
   const demandProgress = (demand: Demand) => {
     const progress = Math.min(100, Math.max(0, Number(demand.progress) || 0));
@@ -302,8 +301,7 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const scopedIds = new Set(scoped.map((d) => d.id));
   const planned = roadmap.filter((item) => scopedIds.has(item.demandId));
   const effort = scoped.reduce((sum, demand) => sum + demand.effort, 0);
-  const capacityProductFilter = productFilter === "Todos" ? capacityProductName : productFilter;
-  const scopedTeam = team.filter(person => person.product.trim().toLowerCase() === capacityProductFilter.trim().toLowerCase() && person.active !== false);
+  const scopedTeam = team.filter(person => (productFilter === "Todos" || person.product === productFilter) && person.active !== false);
   const collaboratorKey = (person: Staff) => {
     const normalizedName = person.name.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
     return normalizedName || `id:${person.id}`;
@@ -371,7 +369,7 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const progress = scoped.length ? Math.round(scoped.reduce((sum, demand) => sum + demandProgress(demand), 0) / scoped.length) : 0;
   const criticalDemands = scoped.filter(demand => ["alto", "crítico", "critico"].includes(demand.risk.trim().toLocaleLowerCase("pt-BR"))).length;
   const kpis = [
-    ["Capacidade total", `${totalCapacity}h`, productFilter === "Todos" ? `${utilization}% alocada · ${collaboratorCount(scopedTeam)} ativos em ${capacityProductName}` : `${utilization}% alocada · ${collaboratorCount(scopedTeam)} colaboradores ativos`, utilization > 90 ? "bad" : "blue", I.Users, utilization > 90 ? "kpi-capacity-critical" : "kpi-capacity"],
+    ["Capacidade total", `${totalCapacity}h`, productFilter === "Todos" ? `${utilization}% alocada · ${collaboratorCount(scopedTeam)} ativos em todos os produtos` : `${utilization}% alocada · ${collaboratorCount(scopedTeam)} colaboradores ativos`, utilization > 90 ? "bad" : "blue", I.Users, utilization > 90 ? "kpi-capacity-critical" : "kpi-capacity"],
     ["Capacidade estimada", `${effort}h`, `${scoped.length} demandas`, "warn", I.Gauge, "kpi-effort"],
     ["Roadmap planejado", String(planned.length), `${completed} concluídas`, "cyan", I.Map, "kpi-roadmap"],
     ["Progresso médio", `${progress}%`, "no escopo atual", "good", I.Crosshair, "kpi-progress"],
@@ -2072,6 +2070,11 @@ function Capacity() {
   const { products } = useProducts();
   const { rows, setRows, roadmap, setRoadmap } = useDemands();
   const availableProducts = products.filter(product => product.active);
+  const productFilterOptions = Array.from(new Set([
+    ...availableProducts.map(product => product.name),
+    ...team.map(person => person.product).filter(Boolean),
+  ])).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const [productFilter, setProductFilter] = useState("Todos");
   const [allocationFor,setAllocationFor]=useState<Staff|null>(null);
   const [form, setForm] = useState(emptyStaff);
   const [editing, setEditing] = useState<Staff | null>(null);
@@ -2106,7 +2109,7 @@ function Capacity() {
   const allocatedDemandHours = (person: Staff) =>
     demandAllocations(person).reduce((sum, item) => sum + item.hours, 0);
   const effectiveUsed = (person: Staff) => allocatedDemandHours(person);
-  const filteredTeam=[...team].sort((a,b)=>Number(b.active!==false)-Number(a.active!==false)||a.name.localeCompare(b.name,"pt-BR"));
+  const filteredTeam=[...team.filter(person=>productFilter==="Todos"||person.product===productFilter)].sort((a,b)=>Number(b.active!==false)-Number(a.active!==false)||a.name.localeCompare(b.name,"pt-BR"));
   const activeTeam=filteredTeam.filter(person=>person.active!==false);
   const uniqueCollaboratorCount = (people: Staff[]) => new Set(people.map((person) => {
     const name = person.name.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").toLocaleLowerCase("pt-BR");
@@ -2199,7 +2202,7 @@ function Capacity() {
         action={<div className="capacity-actions"><button className="ghost" onClick={()=>fileRef.current?.click()} disabled={importing}>{importing?<I.LoaderCircle className="spin"/>:<I.FileSpreadsheet/>}{importing?"Importando...":"Importar Excel"}</button><input ref={fileRef} type="file" accept=".xlsx,.xls" hidden onChange={importCapacity}/><button className="primary" onClick={openNew}><I.UserPlus /> Novo colaborador</button></div>}
       />
       {importFeedback&&<div className="import-feedback"><I.CircleCheck/><span>{importFeedback}</span><button onClick={()=>setImportFeedback("")}><I.X/></button></div>}
-      <div className="capacity-filter"><div><I.Boxes/><span><b>Capacidade por produto</b><small>Exibindo colaboradores de todos os produtos ativos</small></span></div><Badge tone="gray">{availableProducts.length} produto(s)</Badge></div>
+      <div className="capacity-filter"><div><I.Boxes/><span><b>Filtro por produto</b><small>{productFilter==="Todos"?"Exibindo colaboradores de todos os produtos":`Exibindo colaboradores de ${productFilter}`}</small></span></div><select aria-label="Filtrar colaboradores por produto" value={productFilter} onChange={event=>setProductFilter(event.target.value)}><option value="Todos">Todos os produtos</option>{productFilterOptions.map(product=><option key={product} value={product}>{product}</option>)}</select></div>
       <div className="kpis compact capacity-summary-kpis">
         <Card>
           <span>Capacidade total</span>
