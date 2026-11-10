@@ -1176,8 +1176,17 @@ function Demands() {
   const runningToday=Boolean(d.startDate&&(d.endDate||d.dueDate)&&d.startDate<=today&&(d.endDate||d.dueDate||"")>=today);
     return (d.name+d.id+d.product).toLowerCase().includes(q.toLowerCase())&&(productFilter==="Todos"||d.product===productFilter)&&matchesQuarter&&(executionFilter==="Todas"||runningToday)&&(statusFilter==="Todos"||displayDemandStatus(d.status)===statusFilter);
   }).sort((a,b)=>{
-    const rank=(status:string)=>({"Concluído":0,"Concluída":0,"Em Desenvolvimento":1,"Não Iniciado":2}[displayDemandStatus(status)]??3);
-    return rank(a.status)-rank(b.status)||a.name.localeCompare(b.name,"pt-BR");
+    const rank=(demand:Demand)=>{
+      const status=displayDemandStatus(demand.status);
+      const normalized=status.trim().toLocaleLowerCase("pt-BR");
+      if (["Concluído","Concluída"].includes(status)||Number(demand.progress)>=100) return 0;
+      if (normalized==="em desenvolvimento") return 1;
+      if (Number(demand.progress)>0) return 2;
+      if (["em estudos","estudos"].includes(normalized)) return 3;
+      if (normalized==="não iniciado") return 4;
+      return 5;
+    };
+    return rank(a)-rank(b)||a.name.localeCompare(b.name,"pt-BR");
   });
   const change = (
     e: React.ChangeEvent<
@@ -1700,11 +1709,13 @@ function DemandTableRows({
             const normalizedStatus = currentStatus.trim().toLocaleLowerCase("pt-BR");
             const rowClass = completedByStatus || completedByProgress
               ? "demand-row-completed"
-              : normalizedStatus === "em desenvolvimento" || Number(d.progress) > 0
+              : normalizedStatus === "em desenvolvimento"
                 ? "demand-row-development"
                 : ["em estudos", "estudos"].includes(normalizedStatus)
                   ? "demand-row-studies"
-                  : "";
+                  : Number(d.progress) > 0
+                    ? "demand-row-development"
+                    : "";
             return <tr key={d.id} className={rowClass}>
               <td>
                 {onView ? <button className="demand-title-button" onClick={() => onView(d)}>{d.name}</button> : <b>{d.name}</b>}
