@@ -290,8 +290,9 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const { products } = useProducts();
   const { team } = useTeam();
   const [productFilter, setProductFilter] = useState("Todos");
-  const [capacityQuarter, setCapacityQuarter] = useState(currentQuarter);
-  const scoped = productFilter === "Todos" ? rows : rows.filter((d) => d.product === productFilter);
+  const [quarterFilter, setQuarterFilter] = useState(currentQuarter);
+  const roadmapDemandIdsForQuarter = new Set(roadmap.filter(item => item.quarter === quarterFilter).map(item => item.demandId));
+  const scoped = rows.filter(d => (productFilter === "Todos" || d.product === productFilter) && roadmapDemandIdsForQuarter.has(d.id));
   const demandProgress = (demand: Demand) => {
     const progress = Math.min(100, Math.max(0, Number(demand.progress) || 0));
     const status = demand.status.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR");
@@ -331,26 +332,14 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const availableCapacity = totalCapacity - allocatedCapacity;
   const utilization = totalCapacity ? Math.round((allocatedCapacity / totalCapacity) * 100) : 0;
   const capacityByProduct=products.filter((product)=>product.active&&(productFilter==="Todos"||product.name===productFilter)).map((product)=>{const people=team.filter((person)=>person.product===product.name&&person.active!==false);const total=people.reduce((sum,person)=>sum+person.total,0);const allocated=people.reduce((sum,person)=>sum+demandHoursFor(person.id),0);return {product:product.name,total,allocated,available:total-allocated,collaborators:collaboratorCount(people),utilization:total?Math.round(allocated/total*100):0}});
-  const quarterKey = capacityQuarter.slice(0, 2);
+  const quarterKey = quarterFilter.slice(0, 2);
   const monthLabels: Record<string, string[]> = {
     Q1: ["Jan", "Fev", "Mar"],
     Q2: ["Abr", "Mai", "Jun"],
     Q3: ["Jul", "Ago", "Set"],
     Q4: ["Out", "Nov", "Dez"],
   };
-  const quarterRoadmapCapacity = scopedTeam.reduce((sum, person) => {
-    const hours = roadmap.filter((item) => item.quarter === capacityQuarter).reduce((itemTotal, item) => {
-      const demand = rows.find((row) => row.id === item.demandId);
-      if (!demand || (productFilter !== "Todos" && demand.product !== productFilter)) return itemTotal;
-      const explicit = item.allocations.find((allocation) => allocation.staffId === person.id);
-      if (explicit) return itemTotal + explicit.hours;
-      if (!(demand.resourceIds || []).includes(person.id)) return itemTotal;
-      const explicitTotal = item.allocations.reduce((allocationTotal, allocation) => allocationTotal + allocation.hours, 0);
-      const unadjusted = (demand.resourceIds || []).filter((id) => !item.allocations.some((allocation) => allocation.staffId === id));
-      return itemTotal + (unadjusted.length ? Math.round(Math.max(0, demand.effort - explicitTotal) / unadjusted.length) : 0);
-    }, 0);
-    return sum + hours;
-  }, 0);
+  const quarterRoadmapCapacity = allocatedCapacity;
   const capacityChart = (monthLabels[quarterKey] || monthLabels.Q1).map((m) => {
     const monthlyTotal = Math.round(totalCapacity / 3);
     const roadmapHours = Math.round(quarterRoadmapCapacity / 3);
@@ -366,10 +355,16 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
   const testingCapacity = testingTeam.reduce((sum, person) => sum + person.total, 0);
   const coordinationCapacity = coordinationTeam.reduce((sum, person) => sum + person.total, 0);
   const specialistCapacity = specialistTeam.reduce((sum, person) => sum + person.total, 0);
+  const deliveryTeam = scopedTeam.filter(person => {
+    const role = person.role.trim().toUpperCase();
+    return role !== "COORDENADOR" && role !== "ESPECIALISTA" && role !== "ESPECIALISTA DEV 1";
+  });
+  const remainingDeliveryCapacity = deliveryTeam.reduce((sum, person) => sum + person.total - demandHoursFor(person.id), 0);
   const progress = scoped.length ? Math.round(scoped.reduce((sum, demand) => sum + demandProgress(demand), 0) / scoped.length) : 0;
   const criticalDemands = scoped.filter(demand => ["alto", "crítico", "critico"].includes(demand.risk.trim().toLocaleLowerCase("pt-BR"))).length;
   const kpis = [
     ["Capacidade total", `${totalCapacity}h`, productFilter === "Todos" ? `${utilization}% alocada · ${collaboratorCount(scopedTeam)} ativos em todos os produtos` : `${utilization}% alocada · ${collaboratorCount(scopedTeam)} colaboradores ativos`, utilization > 90 ? "bad" : "blue", I.Users, utilization > 90 ? "kpi-capacity-critical" : "kpi-capacity"],
+    ["Capacidade restante", `${remainingDeliveryCapacity}h`, "Sem Coordenador e Especialista", remainingDeliveryCapacity < 0 ? "bad" : "good", I.Clock3, remainingDeliveryCapacity < 0 ? "kpi-capacity-critical" : "kpi-capacity-remaining"],
     ["Capacidade estimada", `${effort}h`, `${scoped.length} demandas`, "warn", I.Gauge, "kpi-effort"],
     ["Roadmap planejado", String(planned.length), `${completed} concluídas`, "cyan", I.Map, "kpi-roadmap"],
     ["Progresso médio", `${progress}%`, "no escopo atual", "good", I.Crosshair, "kpi-progress"],
@@ -380,7 +375,7 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
         title="Visão geral do roadmap"
         desc="Acompanhe capacidade, progresso e decisões críticas do trimestre."
       />
-      <div className="dashboard-filter"><div><I.Filter/><span><b>Escopo dos indicadores</b><small>Visualize o consolidado ou um produto específico</small></span></div><select value={productFilter} onChange={(e) => setProductFilter(e.target.value)}><option>Todos</option>{products.filter((p)=>p.active).map((p)=><option key={p.id} value={p.name}>{p.name}</option>)}</select></div>
+      <div className="dashboard-filter"><div><I.Filter/><span><b>Escopo dos indicadores</b><small>Filtre por produto e Quarter</small></span></div><select aria-label="Filtrar indicadores por produto" value={productFilter} onChange={(e) => setProductFilter(e.target.value)}><option>Todos</option>{products.filter((p)=>p.active).map((p)=><option key={p.id} value={p.name}>{p.name}</option>)}</select><select aria-label="Filtrar visão geral por Quarter" value={quarterFilter} onChange={event => setQuarterFilter(event.target.value)}>{[...new Set([...quarters, ...roadmap.map(item => item.quarter)])].map(quarter=><option key={quarter} value={quarter}>{quarter}{quarter === currentQuarter ? " · Atual" : ""}</option>)}</select></div>
       <div className="kpis dashboard-kpis">
         {kpis.map(([n, v, d, t, Icon, cardTone]: any) => (
           <Card key={n} className={`kpi ${cardTone}`}>
@@ -405,11 +400,8 @@ function Dashboard({ go }: { go: (p: Page) => void }) {
           <div className="cardhead">
             <div>
               <h3>Capacidade por categoria</h3>
-              <p>Distribuição mensal de {capacityQuarter}</p>
+              <p>Distribuição mensal de {quarterFilter}</p>
             </div>
-            <label className="quarter-select capacity-chart-quarter"><I.CalendarRange/><select aria-label="Quarter da capacidade por categoria" value={capacityQuarter} onChange={(event) => setCapacityQuarter(event.target.value)}>
-              {[...new Set([...quarters, currentQuarter])].map((quarter) => <option key={quarter} value={quarter}>{quarter}{quarter === currentQuarter ? " · Atual" : ""}</option>)}
-            </select></label>
           </div>
           <div className="chart">
             <ResponsiveContainer>
