@@ -41,6 +41,7 @@ function usePersistentState<T>(key: string, initialValue: T | (() => T)) {
   });
 
   useEffect(() => {
+    if (readPortalState<T | undefined>(key, undefined) === value) return;
     void savePortalState(key, value);
   }, [key, value]);
 
@@ -162,6 +163,7 @@ const DemandContext = createContext<{
   setHistory: React.Dispatch<React.SetStateAction<ChangeLog[]>>;
   versions: RoadmapVersion[];
   setVersions: React.Dispatch<React.SetStateAction<RoadmapVersion[]>>;
+  saveRows: (update: (rows: Demand[]) => Demand[]) => Promise<boolean>;
 } | null>(null);
 function DemandProvider({ children }: { children: React.ReactNode }) {
   const [rows, setRows] = usePersistentState<Demand[]>("dev-plan:demands", []);
@@ -171,8 +173,14 @@ function DemandProvider({ children }: { children: React.ReactNode }) {
   );
   const [history,setHistory]=usePersistentState<ChangeLog[]>("dev-plan:history", []);
   const [versions,setVersions]=usePersistentState<RoadmapVersion[]>("dev-plan:roadmap-versions", []);
+  const saveRows = async (update: (current: Demand[]) => Demand[]) => {
+    const next = update(rows);
+    if (!(await savePortalState("dev-plan:demands", next))) return false;
+    setRows(next);
+    return true;
+  };
   return (
-    <DemandContext.Provider value={{ rows, setRows, roadmap, setRoadmap, history, setHistory, versions, setVersions }}>
+    <DemandContext.Provider value={{ rows, setRows, roadmap, setRoadmap, history, setHistory, versions, setVersions, saveRows }}>
       {children}
     </DemandContext.Provider>
   );
@@ -189,6 +197,11 @@ function useDemands() {
   const canSeeVersion = (version: RoadmapVersion) => version.demands.some(canSeeDemand);
   return {
     rows: value.rows.filter(canSeeDemand), setRows: scopedSetter(value.setRows, canSeeDemand),
+    saveRows: (update: (rows: Demand[]) => Demand[]) => {
+      const visible = value.rows.filter(canSeeDemand);
+      const hidden = value.rows.filter(demand => !canSeeDemand(demand));
+      return value.saveRows(current => [...hidden, ...update(visible)]);
+    },
     roadmap: value.roadmap.filter(canSeeEntry), setRoadmap: scopedSetter(value.setRoadmap, canSeeEntry),
     history: value.history.filter(canSeeHistory), setHistory: scopedSetter(value.setHistory, canSeeHistory),
     versions: value.versions.filter(canSeeVersion).map(version => ({ ...version, demands: version.demands.filter(canSeeDemand), entries: version.entries.filter(canSeeEntry) })),
@@ -1129,10 +1142,11 @@ const impactClass = (impact: string) => impact === "Baixo" ? "baixo" : impact ==
 function Demands() {
   const currentAccount = useCurrentAccount();
   const [q, setQ] = useState("");
-  const { rows, setRows, roadmap, setRoadmap, setHistory } = useDemands();
+  const { rows, setRows, roadmap, setRoadmap, setHistory, saveRows } = useDemands();
   const { products } = useProducts();
   const { team } = useTeam();
   const [modal, setModal] = useState(false);
+  const [savingDemand, setSavingDemand] = useState(false);
   const [saved, setSaved] = useState(false);
   const [editing, setEditing] = useState<Demand | null>(null);
   const [quickEditing, setQuickEditing] = useState<Demand | null>(null);
@@ -1293,8 +1307,9 @@ function Demands() {
     setResourceQuery("");
     setModal(true);
   };
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingDemand) return;
     const next: Record<string, string> = {};
     if (!form.name.trim()) next.name = "Informe o título da demanda.";
     if (!form.product) next.product = "Selecione um produto cadastrado.";
@@ -1338,11 +1353,16 @@ function Demands() {
       endDate: form.endDate,
       resourceIds: form.resourceIds,
     };
-    setRows(
-      editing
-        ? rows.map((row) => (row.id === editing.id ? data : row))
-        : [data, ...rows],
-    );
+    setSavingDemand(true);
+    setErrors({});
+    const saved = await saveRows(current => editing
+      ? current.map(row => row.id === editing.id ? data : row)
+      : [data, ...current]);
+    setSavingDemand(false);
+    if (!saved) {
+      setErrors({ submit: "Não foi possível salvar a demanda. Confira a conexão com o banco e tente novamente; os dados do formulário foram mantidos." });
+      return;
+    }
     if(!editing && form.planningQuarter!=="Planejamento"){
       setRoadmap((current)=>[...current,{demandId:data.id,quarter:form.planningQuarter,collaborators:[],allocations:[]}]);
       setHistory((current)=>[{id:Date.now(),date:new Date().toLocaleString("pt-BR"),title:"Demanda planejada no cadastro",actor:currentAccount?.name??"Conta ativa",detail:`${data.id} incluída em ${form.planningQuarter}`,tone:"good",product:data.product,quarter:form.planningQuarter},...current]);
@@ -1433,6 +1453,7 @@ function Demands() {
           </div>
         </div>
         <DemandTableRows
+          className="demand-management-grid"
           rows={filtered}
           onView={setViewing}
           onEdit={openEdit}
@@ -1496,11 +1517,12 @@ function Demands() {
                 type="button"
                 className="modal-close"
                 onClick={close}
+                disabled={savingDemand}
                 aria-label="Fechar"
               >
                 <I.X />
               </button>
-              <button type="submit" className="primary demand-header-save"><I.Save/> Salvar</button>
+              <button type="submit" className="primary demand-header-save" disabled={savingDemand}><I.Save/> {savingDemand ? "Salvando..." : "Salvar"}</button>
             </div>
             <div className="modal-body demand-form-grid">
               <div className="form-field wide">
@@ -1576,11 +1598,12 @@ function Demands() {
               </div>
             </div>
             <div className="modal-actions">
-              <button type="button" className="ghost" onClick={close}>
+              {errors.submit && <small className="field-error" role="alert">{errors.submit}</small>}
+              <button type="button" className="ghost" onClick={close} disabled={savingDemand}>
                 Cancelar
               </button>
-              <button type="submit" className="primary">
-                <I.Plus /> Cadastrar demanda
+              <button type="submit" className="primary" disabled={savingDemand}>
+                <I.Plus /> {savingDemand ? "Salvando..." : editing ? "Salvar alterações" : "Cadastrar demanda"}
               </button>
             </div>
           </form>
@@ -1633,6 +1656,7 @@ function Demands() {
   );
 }
 function DemandTableRows({
+  className,
   rows,
   onView,
   onEdit,
@@ -1641,6 +1665,7 @@ function DemandTableRows({
   showRecordId = true,
   showRisk = true,
 }: {
+  className?: string;
   rows: Demand[];
   onView?: (d: Demand) => void;
   onEdit?: (d: Demand) => void;
@@ -1650,7 +1675,7 @@ function DemandTableRows({
   showRisk?: boolean;
 }) {
   return (
-    <div className="tablewrap">
+    <div className={`tablewrap${className ? ` ${className}` : ""}`}>
       <table>
         <thead>
           <tr>
@@ -1672,7 +1697,15 @@ function DemandTableRows({
             const completedByProgress = Number(d.progress) >= 100;
             const status = completedByProgress ? "Concluído" : currentStatus;
             const progress = completedByStatus || completedByProgress ? 100 : d.progress;
-            return <tr key={d.id}>
+            const normalizedStatus = currentStatus.trim().toLocaleLowerCase("pt-BR");
+            const rowClass = completedByStatus || completedByProgress
+              ? "demand-row-completed"
+              : normalizedStatus === "em desenvolvimento" || Number(d.progress) > 0
+                ? "demand-row-development"
+                : ["em estudos", "estudos"].includes(normalizedStatus)
+                  ? "demand-row-studies"
+                  : "";
+            return <tr key={d.id} className={rowClass}>
               <td>
                 {onView ? <button className="demand-title-button" onClick={() => onView(d)}>{d.name}</button> : <b>{d.name}</b>}
                 {showRecordId && <small>{d.id}</small>}

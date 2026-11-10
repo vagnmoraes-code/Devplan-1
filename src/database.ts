@@ -75,7 +75,9 @@ export function savePortalState(key: string, value: unknown): Promise<boolean> {
       return true;
     } catch (error) {
       console.error("Falha ao sincronizar o estado:", error);
-      reportDatabaseError(error);
+      reportDatabaseError(error instanceof TypeError
+        ? new Error("A rota /api/state não respondeu à gravação. Verifique a disponibilidade da função da API e tente novamente.")
+        : error);
       return false;
     }
   });

@@ -25,6 +25,19 @@
 }
 
 .demand-title-button { display: block; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; font-weight: 700; text-align: left; cursor: pointer; }
+.demand-management-grid tbody td:first-child { font-size: 13.2px; }
+.demand-management-grid tbody tr.demand-row-completed td { background: #e8f7ed; }
+.demand-management-grid tbody tr.demand-row-development td { background: #eaf4ff; }
+.demand-management-grid tbody tr.demand-row-studies td { background: #fff8df; }
+.demand-management-grid tbody tr.demand-row-completed td:nth-child(4) .badge { background: #c8eed3; color: #176b35; font-weight: 800; box-shadow: inset 0 0 0 1px #a8dfb9; }
+.demand-management-grid tbody tr.demand-row-development td:nth-child(4) .badge { background: #d4e9ff; color: #205b98; font-weight: 800; box-shadow: inset 0 0 0 1px #b5d7fa; }
+.demand-management-grid tbody tr.demand-row-studies td:nth-child(4) .badge { background: #ffedb3; color: #785700; font-weight: 800; box-shadow: inset 0 0 0 1px #f4d979; }
+.dark .demand-management-grid tbody tr.demand-row-completed td { background: #193426; }
+.dark .demand-management-grid tbody tr.demand-row-development td { background: #1b2d43; }
+.dark .demand-management-grid tbody tr.demand-row-studies td { background: #39321c; }
+.dark .demand-management-grid tbody tr.demand-row-completed td:nth-child(4) .badge { background: #245337; color: #c7f1d2; box-shadow: inset 0 0 0 1px #34734c; }
+.dark .demand-management-grid tbody tr.demand-row-development td:nth-child(4) .badge { background: #25476a; color: #d4e9ff; box-shadow: inset 0 0 0 1px #35608d; }
+.dark .demand-management-grid tbody tr.demand-row-studies td:nth-child(4) .badge { background: #55471c; color: #ffedb3; box-shadow: inset 0 0 0 1px #806923; }
 .demand-title-button:hover { color: #7052f5; text-decoration: underline; }
 .demand-title-button:focus-visible { border-radius: 3px; outline: 2px solid #7052f5; outline-offset: 3px; }
 .demand-summary-modal { width: min(650px, 100%); overflow: hidden; border: 1px solid var(--line); border-radius: 15px; background: var(--bg); color: inherit; box-shadow: 0 28px 90px #07122866; }
