@@ -124,11 +124,17 @@ function useAllowedProductNames() {
 const ProductContext = createContext<{
   products: Product[];
   setProducts: React.Dispatch<React.SetStateAction<Product[]>>;
+  saveProducts: (next: Product[]) => Promise<boolean>;
 } | null>(null);
 function ProductProvider({ children }: { children: React.ReactNode }) {
   const [products, setProducts] = usePersistentState<Product[]>("dev-plan:products", []);
+  const saveProducts = async (next: Product[]) => {
+    if (!(await savePortalState("dev-plan:products", next))) return false;
+    setProducts(next);
+    return true;
+  };
   return (
-    <ProductContext.Provider value={{ products, setProducts }}>
+    <ProductContext.Provider value={{ products, setProducts, saveProducts }}>
       {children}
     </ProductContext.Provider>
   );
@@ -138,7 +144,14 @@ function useProducts() {
   if (!value) throw new Error("ProductProvider ausente");
   const allowedIds = useContext(ProductAccessContext);
   if (allowedIds === null) return value;
-  return { products: value.products.filter(product => allowedIds.has(product.id)), setProducts: scopedSetter(value.setProducts, product => allowedIds.has(product.id)) };
+  return {
+    products: value.products.filter(product => allowedIds.has(product.id)),
+    setProducts: scopedSetter(value.setProducts, product => allowedIds.has(product.id)),
+    saveProducts: (next: Product[]) => value.saveProducts([
+      ...value.products.filter(product => !allowedIds.has(product.id)),
+      ...next,
+    ]),
+  };
 }
 type RoadmapEntry = {
   demandId: string;
@@ -1784,9 +1797,9 @@ function DemandTableRows({
 
 const emptyProduct = { name: "", code: "", description: "", team: "", coordinator: "", active: true };
 function Products() {
-  const { products, setProducts } = useProducts();
-  const { rows } = useDemands();
-  const { team } = useTeam();
+  const { products, setProducts, saveProducts } = useProducts();
+  const { rows, saveRows } = useDemands();
+  const { team, setTeam } = useTeam();
   const sortedProducts = [...products].sort((a,b)=>Number(b.active)-Number(a.active)||a.name.localeCompare(b.name,"pt-BR"));
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
@@ -1816,7 +1829,7 @@ function Products() {
     setEditing(null);
     setError("");
   };
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim() || !form.code.trim() || !form.team.trim() || !form.coordinator.trim()) {
       setError("Nome, código, time e coordenador são obrigatórios.");
@@ -1842,11 +1855,19 @@ function Products() {
       coordinator: form.coordinator.trim(),
       active: form.active,
     };
-    setProducts(
-      editing
-        ? products.map((p) => (p.id === editing.id ? data : p))
-        : [...products, data],
-    );
+    const nextProducts = editing
+      ? products.map((p) => (p.id === editing.id ? data : p))
+      : [...products, data];
+    if (!(await saveProducts(nextProducts))) return;
+    if (editing && editing.name !== data.name) {
+      const savedDemands = await saveRows(current => current.map(demand =>
+        demand.product === editing.name ? { ...demand, product: data.name } : demand,
+      ));
+      if (!savedDemands) return;
+      setTeam(current => current.map(person =>
+        person.product === editing.name ? { ...person, product: data.name } : person,
+      ));
+    }
     close();
   };
   const remove = (product: Product) => {

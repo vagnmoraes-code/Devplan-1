@@ -23,6 +23,8 @@ O projeto inclui as funções `api/state.mjs` e `api/accounts.mjs`, usadas pelo 
 
 No Supabase, aplique `scripts/supabase-schema.sql` pelo SQL Editor antes de publicar a nova versão. O script cria/atualiza `portal_accounts` e `portal_records`, migra os registros antigos e transfere as demandas para `public.demands`, uma demanda por linha, vinculando produto e recursos por seus relacionamentos. A API lê e grava demandas diretamente nessa tabela funcional; as outras coleções continuam em `portal_records`, uma linha por registro.
 
+Para uma instalação Supabase existente, aplique também `scripts/migration-sync-portal-products.sql` pelo SQL Editor. Essa migração sincroniza o catálogo de produtos do portal com `public.products`, usada pelas demandas.
+
 ## Principais recursos
 
 - Dashboard executivo com KPIs, gráficos e insights
